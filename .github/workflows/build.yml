@@ -1,0 +1,69 @@
+name: Build SUSFS LKM Loader Module
+
+on:
+  # 每天 03:00 UTC 自动检查上游是否有新 release，有则重新打包
+  schedule:
+    - cron: "0 3 * * *"
+  # 允许手动触发（可指定上游 tag，留空 = 最新）
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "上游 release tag（留空 = 自动取最新）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: susfs-lkm-loader
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build module zip
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTHOR: ${{ github.repository_owner }}
+        run: |
+          chmod +x build.sh
+          ./build.sh "${{ inputs.tag }}" out
+          cat out/build-info.env >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: susfs-lkm-loader-${{ steps.build.outputs.tag }}
+          path: |
+            out/*.zip
+            out/*.sha256
+
+      - name: Check if release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "susfs-lkm-loader-${{ steps.build.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "susfs-lkm-loader-${{ steps.build.outputs.tag }}" \
+            out/*.zip out/*.sha256 \
+            --title "SUSFS LKM Loader ${{ steps.build.outputs.tag }}" \
+            --notes "Auto-built from ${{ steps.build.outputs.upstream_repo }}@${{ steps.build.outputs.tag }}.
+
+          - 含全部 GKI 内核变体的 \`susfs_guard_lkm-*.ko\` 与 \`susfs_insmod\` 加载器
+          - 开机时按设备内核 KMI 自动选择并加载对应 .ko"
