@@ -77,7 +77,7 @@ jobs:
           gh issue create \
             --repo "${{ github.repository }}" \
             --title "上游新版本已自动构建：${{ steps.build.outputs.tag }}" \
-            --body "@${{ github.repository_owner }} 检测到上游 [\${{ steps.build.outputs.upstream_repo }}](https://github.com/${{ steps.build.outputs.upstream_repo }}) 发布新版本 \`${{ steps.build.outputs.tag }}\`，已自动打包完成。
+            --body "@${{ github.repository_owner }} 检测到上游 [${{ steps.build.outputs.upstream_repo }}](https://github.com/${{ steps.build.outputs.upstream_repo }}) 发布新版本 \`${{ steps.build.outputs.tag }}\`，已自动打包完成。
 
           - Release：https://github.com/${{ github.repository }}/releases/tag/susfs-lkm-loader-${{ steps.build.outputs.tag }}
           - 通用包（全部内核变体）：\`susfs-lkm-loader-${{ steps.build.outputs.tag }}.zip\`
