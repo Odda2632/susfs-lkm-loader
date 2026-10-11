@@ -13,6 +13,17 @@ log_msg() {
   echo "$(date '+%F %T') $*" >> "$LOG" 2>/dev/null
 }
 
+# 把加载状态写回 module.prop 的 description，KSU 管理器中即可看到
+update_status() {
+  prop="$MODDIR/module.prop"
+  [ -f "$prop" ] || return 0
+  desc=$(sed -n 's/^description=//p' "$prop" | head -n1 | sed 's/ *||STATUS:.*$//')
+  tmp="$MODDIR/.module.prop.tmp"
+  grep -v '^description=' "$prop" > "$tmp" 2>/dev/null || return 0
+  printf 'description=%s ||STATUS:%s\n' "$desc" "$1" >> "$tmp"
+  mv "$tmp" "$prop"
+}
+
 KVER=$(uname -r)
 # GKI KMI，例如 "5.15.202-android13-8-xxxx" -> android13 + 5.15
 AND_PART=$(echo "$KVER" | grep -oE 'android1[0-9]' | head -n1)
@@ -25,6 +36,7 @@ fi
 
 if [ -z "$KO" ] || [ ! -f "$KO" ]; then
   log_msg "no exact .ko for kernel '$KVER' (kmi ${AND_PART:-?}-${MM_PART:-?}); skip loading"
+  update_status "未加载: 无匹配内核 (${KVER})"
   exit 1
 fi
 
@@ -37,9 +49,16 @@ elif [ -x "$LOADER_DIR/susfs_insmod" ]; then
   "$LOADER_DIR/susfs_insmod" "$KO"
 else
   log_msg "no usable loader (ksud / susfs_insmod); skip loading"
+  update_status "未加载: 无可用加载器"
   exit 1
 fi
 status=$?
 
-log_msg "done, exit=$status"
+if [ "$status" -eq 0 ]; then
+  log_msg "loaded ok"
+  update_status "已加载 $(basename "$KO") @ $(date '+%m-%d %H:%M')"
+else
+  log_msg "load failed (exit=$status)"
+  update_status "加载失败 exit=$status @ $(date '+%m-%d %H:%M')"
+fi
 exit $status

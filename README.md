@@ -65,11 +65,15 @@ chmod +x build.sh
 产物输出到 `out/`：
 
 ```
-out/susfs-lkm-loader-<tag>.zip                # 通用包（全部内核变体）
-out/susfs-lkm-loader-<tag>-android12-5.10.zip # 单变体……每个内核一份
-out/SHA256SUMS                                # 所有 zip 的校验和
+out/susfs-lkm-loader-<tag>.zip                        # 通用包（全部内核变体）
+out/susfs-lkm-loader-<tag>-android12-5.10.zip         # 单变体……每个内核一份（带内核校验）
+out/susfs-lkm-loader-<tag>-android12-5.10-nocheck.zip # 无内核校验版（仅默认的 android12-5.10）
+out/SHA256SUMS                                        # 所有 zip 的校验和
 out/build-info.env
 ```
+
+> **两种 12-5.10 包的区别**：普通版加载前会校验内核串；`-nocheck` 版**跳过校验直接加载**，
+> 仅当校验误判或你确认内核匹配时使用（装错内核会 panic）。
 
 ### 3. 可配置项
 
@@ -79,6 +83,7 @@ out/build-info.env
 | --- | --- | --- |
 | `UPSTREAM_REPO` | `inforcqb/susfs4ksu-lkm` | 上游仓库 `owner/repo` |
 | `AUTHOR` | `github-actions` | 写入 `module.prop` 的作者（工作流里取仓库 owner） |
+| `NOCHECK_VARIANTS` | `android12-5.10` | 额外产出的“无内核校验”变体，空格分隔多个 |
 | `GITHUB_TOKEN` / `GH_TOKEN` | 空 | 设置后走认证请求，避免 GitHub API 限流 |
 
 ## 刷入与验证
@@ -88,7 +93,9 @@ out/build-info.env
 2. 在 KernelSU / APatch 中刷入对应 zip 并重启。
 3. 开机脚本会**严格校验**内核串后再加载；不匹配就跳过（不会硬装错版本）。
    - 加载方式：KernelSU/APatch 走 `ksud insmod`；非 KernelSU 才用自带的 `susfs_insmod`。
-4. 验证：
+4. **在 KernelSU 管理器里看状态**：脚本会把结果写回模块描述，模块卡片上直接显示
+   `||STATUS: 已加载 susfs_guard_lkm-android12-5.10.ko @ 10-12 20:30`（下拉刷新即可）。
+5. 进一步验证：
    - 加载日志：`cat /data/adb/susfs_lkm.log`
    - 检查控制节点：`/proc/susfs_*`
    - `dmesg | grep -i susfs`

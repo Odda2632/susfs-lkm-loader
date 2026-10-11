@@ -147,7 +147,46 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
   echo "==> 变体产物: $vzip"
 done
 
-# 7) 校验和汇总
+# 7) 额外打包“无内核校验”变体（默认 android12-5.10，文件名带 -nocheck 区分）
+NOCHECK_VARIANTS="${NOCHECK_VARIANTS:-android12-5.10}"
+NOCHECK_LIST=""
+for kmi in $NOCHECK_VARIANTS; do
+  ko="$STAGE/loader/susfs_guard_lkm-${kmi}.ko"
+  if [ ! -f "$ko" ]; then
+    echo "==> 跳过无校验变体（无此 ko）: $kmi"
+    continue
+  fi
+  vid="susfs_lkm_loader_$(printf '%s' "$kmi" | tr -c 'A-Za-z0-9_' '_')_nocheck"
+
+  nstage="$(mktemp -d)"
+  mkdir -p "$nstage/loader"
+  cp "$ko" "$nstage/loader/"
+  [ -f "$STAGE/loader/susfs_insmod" ] && cp "$STAGE/loader/susfs_insmod" "$nstage/loader/"
+
+  ndesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi, NO kernel KMI check."
+  sed -e "s|__ID__|$vid|g" \
+      -e "s|__NAME__|SUSFS LKM Loader ($kmi, no-check)|g" \
+      -e "s|__VERSION__|$TAG|g" \
+      -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
+      -e "s|__AUTHOR__|$AUTHOR|g" \
+      -e "s|__DESC__|$ndesc|g" \
+      "$TEMPLATE_DIR/module.prop" > "$nstage/module.prop"
+  sed -e "s|__KO_NAME__|$(basename "$ko")|g" \
+      "$TEMPLATE_DIR/post-fs-data-variant-nocheck.sh" > "$nstage/post-fs-data.sh"
+
+  chmod 755 "$nstage/post-fs-data.sh"
+  [ -f "$nstage/loader/susfs_insmod" ] && chmod 755 "$nstage/loader/susfs_insmod"
+  chmod 644 "$nstage/module.prop" "$nstage/loader/"*.ko
+
+  nzip="$OUT_DIR_ABS/susfs-lkm-loader-${TAG}-${kmi}-nocheck.zip"
+  rm -f "$nzip"
+  ( cd "$nstage" && zip -qr -9 "$nzip" . )
+  rm -rf "$nstage"
+  NOCHECK_LIST="$NOCHECK_LIST $kmi"
+  echo "==> 无校验变体产物: $nzip"
+done
+
+# 8) 校验和汇总
 ( cd "$OUT_DIR_ABS" && sha256sum ./*.zip > SHA256SUMS )
 
 cat > "$OUT_DIR_ABS/build-info.env" <<EOF
@@ -156,6 +195,7 @@ upstream_repo=$UPSTREAM_REPO
 version_code=$VERSION_CODE
 zip=$ZIP
 variants=${VARIANT_LIST# }
+nocheck=${NOCHECK_LIST# }
 EOF
 
 echo "==> 校验汇总: $OUT_DIR_ABS/SHA256SUMS"
