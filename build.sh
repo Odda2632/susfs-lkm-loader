@@ -97,9 +97,10 @@ sed -e "s|__ID__|susfs_lkm_loader|g" \
 cp "$TEMPLATE_DIR/post-fs-data.sh" "$STAGE/post-fs-data.sh"
 cp "$TEMPLATE_DIR/boot-completed.sh" "$STAGE/boot-completed.sh"
 cp "$TEMPLATE_DIR/action.sh" "$STAGE/action.sh"
+cp "$TEMPLATE_DIR/customize.sh" "$STAGE/customize.sh"
 touch "$STAGE/skip_mount"
 
-chmod 755 "$STAGE/post-fs-data.sh" "$STAGE/boot-completed.sh" "$STAGE/action.sh"
+chmod 755 "$STAGE/post-fs-data.sh" "$STAGE/boot-completed.sh" "$STAGE/action.sh" "$STAGE/customize.sh"
 [ -f "$STAGE/loader/susfs_insmod" ] && chmod 755 "$STAGE/loader/susfs_insmod"
 chmod 644 "$STAGE/module.prop" "$STAGE"/loader/*.ko
 
@@ -139,9 +140,10 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
       "$TEMPLATE_DIR/post-fs-data-variant.sh" > "$vstage/post-fs-data.sh"
   cp "$TEMPLATE_DIR/boot-completed.sh" "$vstage/boot-completed.sh"
   cp "$TEMPLATE_DIR/action.sh" "$vstage/action.sh"
+  cp "$TEMPLATE_DIR/customize.sh" "$vstage/customize.sh"
   touch "$vstage/skip_mount"
 
-  chmod 755 "$vstage/post-fs-data.sh" "$vstage/boot-completed.sh" "$vstage/action.sh"
+  chmod 755 "$vstage/post-fs-data.sh" "$vstage/boot-completed.sh" "$vstage/action.sh" "$vstage/customize.sh"
   [ -f "$vstage/loader/susfs_insmod" ] && chmod 755 "$vstage/loader/susfs_insmod"
   chmod 644 "$vstage/module.prop" "$vstage/loader/"*.ko
 
@@ -181,9 +183,10 @@ for kmi in $NOCHECK_VARIANTS; do
       "$TEMPLATE_DIR/post-fs-data-variant-nocheck.sh" > "$nstage/post-fs-data.sh"
   cp "$TEMPLATE_DIR/boot-completed.sh" "$nstage/boot-completed.sh"
   cp "$TEMPLATE_DIR/action.sh" "$nstage/action.sh"
+  cp "$TEMPLATE_DIR/customize.sh" "$nstage/customize.sh"
   touch "$nstage/skip_mount"
 
-  chmod 755 "$nstage/post-fs-data.sh" "$nstage/boot-completed.sh" "$nstage/action.sh"
+  chmod 755 "$nstage/post-fs-data.sh" "$nstage/boot-completed.sh" "$nstage/action.sh" "$nstage/customize.sh"
   [ -f "$nstage/loader/susfs_insmod" ] && chmod 755 "$nstage/loader/susfs_insmod"
   chmod 644 "$nstage/module.prop" "$nstage/loader/"*.ko
 

@@ -78,12 +78,14 @@ fi
 
 log_msg "loading $KO (kernel $KVER)"
 
-if [ ! -x "$LOADER_DIR/susfs_insmod" ]; then
+if [ ! -f "$LOADER_DIR/susfs_insmod" ]; then
   log_msg "susfs_insmod missing; skip loading"
   update_status "未加载: 缺少 susfs_insmod"
   rm -f "$GUARD"
   exit 1
 fi
+# 安装时若未带可执行位，这里补上（KernelSU 解压不一定保留）
+chmod 0755 "$LOADER_DIR/susfs_insmod" 2>/dev/null
 
 # 用自带的 susfs_insmod 加载（不要用 ksud insmod）。先带 expose_proc=1，参数不被接受则退回无参。
 "$LOADER_DIR/susfs_insmod" "$KO" expose_proc=1
