@@ -1,3 +1,4 @@
+# 未测试，可用性存疑
 # SUSFS LKM Loader (Auto-Build)
 
 自动追踪上游 [inforcqb/susfs4ksu-lkm](https://github.com/inforcqb/susfs4ksu-lkm) 的最新 release，
