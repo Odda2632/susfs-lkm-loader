@@ -1,7 +1,7 @@
 name: Build SUSFS LKM Loader Module
 
 on:
-  # 每天 03:00 UTC 自动检查上游是否有新 release，有则重新打包并通知
+  # 每天 03:00 UTC 检查上游是否有新 release
   schedule:
     - cron: "0 3 * * *"
   # 允许手动触发（可指定上游 tag，留空 = 最新）
@@ -11,9 +11,17 @@ on:
         description: "上游 release tag（留空 = 自动取最新）"
         required: false
         default: ""
+  # 封装代码（build.sh / template / 工作流本身）有改动时立即重跑，
+  # 以便把修好的模块同步进已存在的 Release 资产。
+  push:
+    branches: [ main ]
+    paths:
+      - "build.sh"
+      - "template/**"
+      - ".github/workflows/build.yml"
 
 permissions:
-  contents: write   # 创建 Release / 上传资产
+  contents: write   # 创建 / 更新 Release 与资产
   issues: write     # 上游更新时创建通知 Issue
 
 concurrency:
@@ -45,6 +53,17 @@ jobs:
             out/*.zip
             out/SHA256SUMS
 
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          Auto-built from ${{ steps.build.outputs.upstream_repo }}@${{ steps.build.outputs.tag }}.
+          作者：Odda2632 & TraeCode
+
+          - 通用包 `susfs-lkm-loader-${{ steps.build.outputs.tag }}.zip`：含全部 GKI 内核变体，开机按设备 KMI 自动匹配
+          - 单变体包 `...-<kmi>.zip`：每个内核变体各一份（如 `android12-5.10`），只含对应 .ko
+          - 无校验包 `...-<kmi>-nocheck.zip`：不做 KMI 校验，直接加载（内核串不含 `-androidNN-` 时用这个）
+          EOF
+
       - name: Check if release already exists
         id: check
         env:
@@ -56,19 +75,25 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish release
-        if: steps.check.outputs.exists == 'false'
+      # Release 不存在 → 新建；已存在 → 覆盖更新资产与说明（这样改封装代码后重跑即可同步）
+      - name: Publish or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "susfs-lkm-loader-${{ steps.build.outputs.tag }}" \
-            out/*.zip out/SHA256SUMS \
-            --title "SUSFS LKM Loader ${{ steps.build.outputs.tag }}" \
-            --notes "Auto-built from ${{ steps.build.outputs.upstream_repo }}@${{ steps.build.outputs.tag }}.
+          REL="susfs-lkm-loader-${{ steps.build.outputs.tag }}"
+          if [ "${{ steps.check.outputs.exists }}" = "true" ]; then
+            echo "==> Release $REL 已存在，覆盖更新资产与说明"
+            gh release upload "$REL" out/*.zip out/SHA256SUMS --clobber
+            gh release edit "$REL" --notes-file release-notes.md
+          else
+            echo "==> 新建 Release $REL"
+            gh release create "$REL" \
+              out/*.zip out/SHA256SUMS \
+              --title "SUSFS LKM Loader ${{ steps.build.outputs.tag }}" \
+              --notes-file release-notes.md
+          fi
 
-          - 通用包 \`susfs-lkm-loader-${{ steps.build.outputs.tag }}.zip\`：含全部 GKI 内核变体，开机按设备 KMI 自动匹配加载
-          - 单变体包 \`...-<kmi>.zip\`：每个内核变体各一份（如 \`android12-5.10\`），只含对应 .ko，开机直接加载"
-
+      # 仅当这确实是上游新版本（Release 首次创建）时才通知，避免刷屏
       - name: Notify owner (new upstream release)
         if: steps.check.outputs.exists == 'false'
         env:
