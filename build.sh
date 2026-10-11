@@ -16,7 +16,9 @@
 set -euo pipefail
 
 UPSTREAM_REPO="${UPSTREAM_REPO:-inforcqb/susfs4ksu-lkm}"
-AUTHOR="${AUTHOR:-github-actions}"
+AUTHOR="${AUTHOR:-Odda2632 & TraeCode}"
+# sed 替换串里 & 表示“整个匹配”，需转义
+AUTHOR_SED="$(printf '%s' "$AUTHOR" | sed 's/[&\\|]/\\&/g')"
 TAG="${1:-latest}"
 OUT_DIR="${2:-out}"
 
@@ -91,7 +93,7 @@ sed -e "s|__ID__|susfs_lkm_loader|g" \
     -e "s|__NAME__|SUSFS LKM Loader (Auto-Build)|g" \
     -e "s|__VERSION__|$TAG|g" \
     -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
-    -e "s|__AUTHOR__|$AUTHOR|g" \
+    -e "s|__AUTHOR__|$AUTHOR_SED|g" \
     -e "s|__DESC__|$DESC|g" \
     "$TEMPLATE_DIR/module.prop" > "$STAGE/module.prop"
 cp "$TEMPLATE_DIR/post-fs-data.sh" "$STAGE/post-fs-data.sh"
@@ -131,7 +133,7 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
       -e "s|__NAME__|SUSFS LKM Loader ($kmi)|g" \
       -e "s|__VERSION__|$TAG|g" \
       -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
-      -e "s|__AUTHOR__|$AUTHOR|g" \
+      -e "s|__AUTHOR__|$AUTHOR_SED|g" \
       -e "s|__DESC__|$vdesc|g" \
       "$TEMPLATE_DIR/module.prop" > "$vstage/module.prop"
   sed -e "s|__KO_NAME__|$(basename "$ko")|g" \
@@ -176,7 +178,7 @@ for kmi in $NOCHECK_VARIANTS; do
       -e "s|__NAME__|SUSFS LKM Loader ($kmi, no-check)|g" \
       -e "s|__VERSION__|$TAG|g" \
       -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
-      -e "s|__AUTHOR__|$AUTHOR|g" \
+      -e "s|__AUTHOR__|$AUTHOR_SED|g" \
       -e "s|__DESC__|$ndesc|g" \
       "$TEMPLATE_DIR/module.prop" > "$nstage/module.prop"
   sed -e "s|__KO_NAME__|$(basename "$ko")|g" \
