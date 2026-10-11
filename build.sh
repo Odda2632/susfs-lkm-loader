@@ -10,7 +10,7 @@
 #
 # 可用环境变量:
 #   UPSTREAM_REPO  上游仓库（默认 inforcqb/susfs4ksu-lkm）
-#   AUTHOR         写入 module.prop 的作者（默认 Odda2632 & TraeCode）
+#   AUTHOR         写入 module.prop 的作者（默认 Odda2632 & TraeCode，并标注上游原作者）
 #   GITHUB_TOKEN / GH_TOKEN  可选；设置后走认证请求，避免 API 限流
 #
 set -euo pipefail
@@ -91,7 +91,7 @@ patch=$(printf '%s' "$TAG" | sed -nE 's/^[^0-9]*[0-9]+\.[0-9]+\.([0-9]+).*/\1/p'
 rev=$(printf '%s' "$TAG" | sed -nE 's/.*[rR]([0-9]+).*/\1/p'); rev=${rev:-0}
 VERSION_CODE=$(( major * 1000000 + minor * 10000 + patch * 100 + rev ))
 
-DESC="Auto-built from $UPSTREAM_REPO@$TAG; loads the kernel-matching susfs_guard_lkm.ko at boot."
+DESC="Auto-built from $UPSTREAM_REPO@$TAG (LKM by $UPSTREAM_AUTHOR); picks the matching susfs_guard_lkm.ko and loads it via susfs_insmod at late_start."
 
 sed -e "s|__ID__|susfs_lkm_loader|g" \
     -e "s|__NAME__|SUSFS LKM Loader (Auto-Build)|g" \
@@ -132,7 +132,7 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
   cp "$ko" "$vstage/loader/"
   [ -f "$STAGE/loader/susfs_insmod" ] && cp "$STAGE/loader/susfs_insmod" "$vstage/loader/"
 
-  vdesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi ($base.ko)."
+  vdesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi ($base.ko); KMI-checked load via susfs_insmod at late_start."
   sed -e "s|__ID__|$vid|g" \
       -e "s|__NAME__|SUSFS LKM Loader ($kmi)|g" \
       -e "s|__VERSION__|$TAG|g" \
@@ -177,7 +177,7 @@ for kmi in $NOCHECK_VARIANTS; do
   cp "$ko" "$nstage/loader/"
   [ -f "$STAGE/loader/susfs_insmod" ] && cp "$STAGE/loader/susfs_insmod" "$nstage/loader/"
 
-  ndesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi, NO kernel KMI check."
+  ndesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi, NO kernel KMI check; load via susfs_insmod at late_start."
   sed -e "s|__ID__|$vid|g" \
       -e "s|__NAME__|SUSFS LKM Loader ($kmi, no-check)|g" \
       -e "s|__VERSION__|$TAG|g" \

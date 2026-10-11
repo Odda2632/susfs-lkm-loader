@@ -57,11 +57,16 @@ jobs:
         run: |
           cat > release-notes.md <<'EOF'
           Auto-built from ${{ steps.build.outputs.upstream_repo }}@${{ steps.build.outputs.tag }}.
-          作者：Odda2632 & TraeCode
+
+          - 上游 LKM 作者：[@inforcqb](https://github.com/inforcqb)（GPL-2.0）
+          - 本封装（打包脚本 / 模块脚本 / 文档）：@Odda2632 & TraeCode，由 AI 协作生成与维护
+          - 加载方案参考：[matsuzaka-yuki](https://github.com/matsuzaka-yuki) 的社区 susfs-lkm-module
 
           - 通用包 `susfs-lkm-loader-${{ steps.build.outputs.tag }}.zip`：含全部 GKI 内核变体，开机按设备 KMI 自动匹配
-          - 单变体包 `...-<kmi>.zip`：每个内核变体各一份（如 `android12-5.10`），只含对应 .ko
+          - 单变体包 `...-<kmi>.zip`：每个内核变体各一份（如 `android12-5.10`），只含对应 .ko，加载前校验内核串
           - 无校验包 `...-<kmi>-nocheck.zip`：不做 KMI 校验，直接加载（内核串不含 `-androidNN-` 时用这个）
+
+          模块在 `late_start`(service.sh) 阶段用自带的 `susfs_insmod` 加载，并带防砖守卫。
           EOF
 
       - name: Check if release already exists
