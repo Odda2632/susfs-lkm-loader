@@ -83,14 +83,25 @@ out/build-info.env
 
 ## 刷入与验证
 
-1. 在 KernelSU / APatch 中刷入 `susfs-lkm-loader-<tag>.zip` 并重启。
-2. 开机脚本会按 KMI 自动加载匹配的 `.ko`。
-3. 验证：
-   - 查看日志：`cat /data/adb/ksu/ksu.log` 或模块日志中 `susfs_lkm` 标签
-   - 检查探针/控制节点：`/proc/susfs_*`
+1. **先确认内核**：跑 `uname -r`（例如 `5.10.101-android12-9-gxxxx`），得到你的 KMI
+   （形如 `android12-5.10`）。**优先刷与该 KMI 完全对应的单变体包**，别用通用包试运气。
+2. 在 KernelSU / APatch 中刷入对应 zip 并重启。
+3. 开机脚本会**严格校验**内核串后再加载；不匹配就跳过（不会硬装错版本）。
+   - 加载方式：KernelSU/APatch 走 `ksud insmod`；非 KernelSU 才用自带的 `susfs_insmod`。
+4. 验证：
+   - 加载日志：`cat /data/adb/susfs_lkm.log`
+   - 检查控制节点：`/proc/susfs_*`
    - `dmesg | grep -i susfs`
 
-> 注意：`.ko` 必须与设备内核 KMI 匹配；内核若锁死 LKM 加载（如部分厂商内核），刷入也不会生效。
+## 出问题怎么救（bootloop / 卡第一屏）
+
+- **有 root/ADB**：`adb shell su -c 'ksud module disable susfs_lkm_loader'`
+  （单变体包的 id 是 `susfs_lkm_loader_<kmi>`，如 `susfs_lkm_loader_android12_5_10`）
+- **进 recovery**：挂载 `/data` 后删除模块目录再开机：
+  `rm -rf /data/adb/modules/susfs_lkm_loader*`
+
+> 注意：`.ko` 必须与设备内核 KMI 精确匹配；内核若锁死 LKM 加载（如部分厂商内核），
+> 加载会失败（不会生效，日志里能看到）。
 
 ## 免责声明
 

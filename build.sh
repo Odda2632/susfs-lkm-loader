@@ -131,6 +131,8 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
       -e "s|__DESC__|$vdesc|g" \
       "$TEMPLATE_DIR/module.prop" > "$vstage/module.prop"
   sed -e "s|__KO_NAME__|$(basename "$ko")|g" \
+      -e "s|__AND__|${kmi%-*}|g" \
+      -e "s|__MM__|${kmi#*-}|g" \
       "$TEMPLATE_DIR/post-fs-data-variant.sh" > "$vstage/post-fs-data.sh"
 
   chmod 755 "$vstage/post-fs-data.sh"
