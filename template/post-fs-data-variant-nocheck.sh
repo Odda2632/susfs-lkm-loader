@@ -1,5 +1,6 @@
 #!/system/bin/sh
-# SUSFS LKM Loader（单内核变体版，无内核校验）—— 开机直接加载内置的 __KO_NAME__
+# SUSFS LKM Loader（单内核变体版，无内核校验）—— 由 service.sh 在 late_start 阶段
+# 直接加载内置的 __KO_NAME__（放 late_start 而非 post-fs-data，避免开机卡第一屏）。
 #
 # 注意：本包不做任何内核 KMI 校验，会把 __KO_NAME__ 无条件加载。仅在你确认内核
 # 匹配、或校验逻辑误判时使用；装错内核会 panic，请自担风险。

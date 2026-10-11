@@ -91,8 +91,10 @@ out/build-info.env
 1. **先确认内核**：跑 `uname -r`（例如 `5.10.101-android12-9-gxxxx`），得到你的 KMI
    （形如 `android12-5.10`）。**优先刷与该 KMI 完全对应的单变体包**，别用通用包试运气。
 2. 在 KernelSU / APatch 中刷入对应 zip 并重启。
-3. 开机脚本会**严格校验**内核串后再加载；不匹配就跳过（不会硬装错版本）。
+3. **加载时机是 `late_start`（`service.sh`），不是开机早期**。这个 `.ko` 会 hook LSM，
+   在内核启动早期（`post-fs-data`）加载会**卡第一屏**，所以必须等系统起来后再加载。
    - 加载方式：KernelSU/APatch 走 `ksud insmod`；非 KernelSU 才用自带的 `susfs_insmod`。
+   - 单变体包会先校验内核串，不匹配就跳过（不会硬装错版本）。
 4. **在 KernelSU 管理器里看状态**：脚本会把结果写回模块描述，模块卡片上直接显示
    `||STATUS: 已加载 susfs_guard_lkm-android12-5.10.ko @ 10-12 20:30`（下拉刷新即可）。
 5. 进一步验证：

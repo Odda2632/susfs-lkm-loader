@@ -1,6 +1,9 @@
 #!/system/bin/sh
-# SUSFS LKM Loader（通用版）—— 开机按设备内核 KMI 精确匹配并加载
+# SUSFS LKM Loader（通用版）—— 由 service.sh 在 late_start 阶段按设备内核 KMI 精确匹配并加载
 # 由 GitHub Actions 打包，loader/ 内含全部内核变体的 .ko 与 susfs_insmod。
+#
+# 为何放在 service.sh 而不是 post-fs-data：在内核启动早期加载这个会 hook LSM 的 .ko
+# 会导致开机卡第一屏；等系统起来（late_start）再加载则正常。
 #
 # 安全策略：
 #   1) 只加载与 uname -r 完全对应的那一份 .ko；匹配不到就跳过，绝不猜。
