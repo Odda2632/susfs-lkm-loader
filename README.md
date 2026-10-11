@@ -100,15 +100,33 @@ out/build-info.env
    - 检查控制节点：`/proc/susfs_*`
    - `dmesg | grep -i susfs`
 
+## 防砖守卫（重要）
+
+自动加载一个会 hook 内核 LSM 的 `.ko` 有让设备起不来的风险，所以模块内置了守卫：
+
+- 加载前写标记 `/data/adb/susfs_lkm.guard`；开机完成后由 `boot-completed.sh` 清除。
+- 若下次开机时该标记仍在，说明**上次加载后没能开机** → 模块自动写下
+  `/data/adb/susfs_lkm.disabled` 并**跳过本次加载**，最多只卡一次，不会无限重启。
+- 管理器中模块描述会显示 `||STATUS: 已自动禁用: 上次加载后未能开机（点“操作”可手动重试）`。
+
+**安全地手动测试**：在 KernelSU 管理器里点该模块的 **操作 / Action** 按钮，
+会立刻手动加载一次并显示结果（成功/失败），不需要重启、也无砖风险。
+手动成功后守卫会被清除，下次开机恢复自动加载。
+
 ## 出问题怎么救（bootloop / 卡第一屏）
 
-- **有 root/ADB**：`adb shell su -c 'ksud module disable susfs_lkm_loader'`
-  （单变体包的 id 是 `susfs_lkm_loader_<kmi>`，如 `susfs_lkm_loader_android12_5_10`）
-- **进 recovery**：挂载 `/data` 后删除模块目录再开机：
+- **先别急**：有了防砖守卫，正常只会卡一次就会自动禁用；多等一次开机即可。
+- **有 root/ADB**：
+  - 关闭自动加载：`adb shell su -c 'touch /data/adb/susfs_lkm.disabled'`
+  - 重新启用自动加载：`adb shell su -c 'rm -f /data/adb/susfs_lkm.disabled /data/adb/susfs_lkm.guard'`
+  - 禁用整个模块：`adb shell su -c 'ksud module disable susfs_lkm_loader_android12_5_10'`
+- **进 recovery**：挂载 `/data` 后删除标记或模块目录再开机：
+  `rm -f /data/adb/susfs_lkm.guard /data/adb/susfs_lkm.disabled`
   `rm -rf /data/adb/modules/susfs_lkm_loader*`
+- **查原因**：`cat /data/adb/susfs_lkm.log`、`/sys/fs/pstore/console-ramoops*`。
 
-> 注意：`.ko` 必须与设备内核 KMI 精确匹配；内核若锁死 LKM 加载（如部分厂商内核），
-> 加载会失败（不会生效，日志里能看到）。
+> 注意：`.ko` 必须与设备内核 KMI 精确匹配；内核若锁死 LKM 加载、或非 GKI/CFI 内核
+> （上游明确只支持 GKI/CFI 设备），加载会失败甚至 panic，日志里能看到。
 
 ## 免责声明
 

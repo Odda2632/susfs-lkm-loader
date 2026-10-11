@@ -2,11 +2,16 @@
 # SUSFS LKM Loader（通用版）—— 开机按设备内核 KMI 精确匹配并加载
 # 由 GitHub Actions 打包，loader/ 内含全部内核变体的 .ko 与 susfs_insmod。
 #
-# 安全策略：只加载与 uname -r 完全对应的那一份 .ko；匹配不到就跳过，绝不猜。
+# 安全策略：
+#   1) 只加载与 uname -r 完全对应的那一份 .ko；匹配不到就跳过，绝不猜。
+#   2) 防砖守卫：加载前写 guard 标记，开机完成后由 boot-completed.sh 清除。
+#      若下次开机时 guard 仍在，说明上次加载后没能开机 → 自动禁用，避免无限重启。
 
 MODDIR=${0%/*}
 LOADER_DIR="$MODDIR/loader"
 LOG=/data/adb/susfs_lkm.log
+GUARD=/data/adb/susfs_lkm.guard
+DISABLED=/data/adb/susfs_lkm.disabled
 
 log_msg() {
   log -p i -t susfs_lkm "$@"
@@ -24,6 +29,24 @@ update_status() {
   mv "$tmp" "$prop"
 }
 
+# ---- 防砖守卫 ----
+if [ "$SUSFS_FORCE" = "1" ]; then
+  rm -f "$DISABLED"
+else
+  if [ -f "$DISABLED" ]; then
+    log_msg "disabled marker present; skip loading"
+    update_status "已禁用: 上次加载后未能开机（管理器点“操作”可手动重试）"
+    exit 1
+  fi
+  if [ -f "$GUARD" ]; then
+    mv -f "$GUARD" "$DISABLED"
+    log_msg "previous load never reached boot-completed; auto-disabled to protect boot"
+    update_status "已自动禁用: 上次加载后未能开机（管理器点“操作”可手动重试）"
+    exit 1
+  fi
+fi
+touch "$GUARD"; sync
+
 KVER=$(uname -r)
 # GKI KMI，例如 "5.15.202-android13-8-xxxx" -> android13 + 5.15
 AND_PART=$(echo "$KVER" | grep -oE 'android1[0-9]' | head -n1)
@@ -37,6 +60,7 @@ fi
 if [ -z "$KO" ] || [ ! -f "$KO" ]; then
   log_msg "no exact .ko for kernel '$KVER' (kmi ${AND_PART:-?}-${MM_PART:-?}); skip loading"
   update_status "未加载: 无匹配内核 (${KVER})"
+  rm -f "$GUARD"
   exit 1
 fi
 
@@ -50,6 +74,7 @@ elif [ -x "$LOADER_DIR/susfs_insmod" ]; then
 else
   log_msg "no usable loader (ksud / susfs_insmod); skip loading"
   update_status "未加载: 无可用加载器"
+  rm -f "$GUARD"
   exit 1
 fi
 status=$?
@@ -57,8 +82,10 @@ status=$?
 if [ "$status" -eq 0 ]; then
   log_msg "loaded ok"
   update_status "已加载 $(basename "$KO") @ $(date '+%m-%d %H:%M')"
+  [ "$SUSFS_FORCE" = "1" ] && rm -f "$GUARD"
 else
   log_msg "load failed (exit=$status)"
   update_status "加载失败 exit=$status @ $(date '+%m-%d %H:%M')"
+  rm -f "$GUARD"
 fi
 exit $status
