@@ -10,13 +10,17 @@
 #
 # 可用环境变量:
 #   UPSTREAM_REPO  上游仓库（默认 inforcqb/susfs4ksu-lkm）
-#   AUTHOR         写入 module.prop 的作者（默认 github-actions）
+#   AUTHOR         写入 module.prop 的作者（默认 Odda2632 & TraeCode）
 #   GITHUB_TOKEN / GH_TOKEN  可选；设置后走认证请求，避免 API 限流
 #
 set -euo pipefail
 
 UPSTREAM_REPO="${UPSTREAM_REPO:-inforcqb/susfs4ksu-lkm}"
+# 上游 GitHub 原作者（从仓库名推导，例如 inforcqb/susfs4ksu-lkm -> inforcqb）
+UPSTREAM_AUTHOR="${UPSTREAM_REPO%%/*}"
 AUTHOR="${AUTHOR:-Odda2632 & TraeCode}"
+# 在作者里标注上游原作者（.ko 由上游提供）
+AUTHOR="${AUTHOR} (LKM by ${UPSTREAM_AUTHOR})"
 # sed 替换串里 & 表示“整个匹配”，需转义
 AUTHOR_SED="$(printf '%s' "$AUTHOR" | sed 's/[&\\|]/\\&/g')"
 TAG="${1:-latest}"
