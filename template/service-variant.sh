@@ -1,6 +1,7 @@
 #!/system/bin/sh
-# SUSFS LKM Loader（单内核变体版，带内核校验）—— post-fs-data 阶段校验内核后加载内置的
+# SUSFS LKM Loader（单内核变体版，带内核校验）—— late_start(service.sh) 校验内核后加载内置的
 # __KO_NAME__。加载方式与参考实现一致：用自带的 susfs_insmod（不要用 ksud insmod）。
+# 放到 late_start 而不是 post-fs-data，避免开机早期加载导致卡第一屏。
 #
 # 安全策略：先确认真实内核串包含 __AND__ 且包含 __MM__，否则跳过，避免把不匹配的 .ko
 # 装进别的内核导致 panic。另有防砖守卫：加载后无法开机时下次自动禁用。

@@ -7,7 +7,7 @@ export SUSFS_FORCE=1
 echo "== SUSFS LKM 手动加载 =="
 echo "内核: $(cat /proc/sys/kernel/osrelease 2>/dev/null || uname -r)"
 echo "----------------------------"
-sh "$MODDIR/post-fs-data.sh"
+sh "$MODDIR/service.sh"
 rc=$?
 echo "----------------------------"
 if [ "$rc" -eq 0 ]; then
