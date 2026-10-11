@@ -13,12 +13,15 @@ GitHub Actions (每天 03:00 UTC / 手动触发)
         ├─ 向上游 API 查询最新 release（或指定 tag）
         ├─ 下载 susfs_guard_lkm-*.ko + susfs_insmod
         ├─ 套用 template/ 生成 module.prop 与 post-fs-data.sh
-        └─ 打包出 susfs-lkm-loader-<tag>.zip
+        ├─ 打包通用包 susfs-lkm-loader-<tag>.zip（含全部内核变体）
+        └─ 再为每个内核变体各打一份单变体包 susfs-lkm-loader-<tag>-<kmi>.zip
    └─ 上传 Artifact + 创建本仓库 GitHub Release
+   └─ 若是上游新版本：额外创建一个 @你 的通知 Issue（触发 GitHub 通知）
 ```
 
 设备侧：刷入模块后，`post-fs-data.sh` 在开机早期运行，读取 `uname -r` 解析 KMI
 （如 `android13-5.15`），从模块内 `loader/` 挑出匹配的 `.ko` 并加载。
+单变体包只含一个 `.ko`，开机直接加载该文件。
 
 ## 目录结构
 
@@ -27,8 +30,9 @@ GitHub Actions (每天 03:00 UTC / 手动触发)
 ├── .github/workflows/build.yml   # 工作流：定时/手动拉取最新版本并打包发布
 ├── build.sh                      # 核心打包脚本（本地也能直接跑）
 ├── template/
-│   ├── module.prop               # 模块元信息模板（含 __VERSION__ 等占位符）
-│   └── post-fs-data.sh           # 开机自动加载脚本（按 KMI 自动选 .ko）
+│   ├── module.prop               # 模块元信息模板（含 __ID__/__VERSION__ 等占位符）
+│   ├── post-fs-data.sh           # 通用包的开机脚本（按 KMI 自动选 .ko）
+│   └── post-fs-data-variant.sh   # 单变体包的开机脚本（直接加载内置 .ko）
 └── README.md
 ```
 
@@ -41,8 +45,14 @@ GitHub Actions (每天 03:00 UTC / 手动触发)
 - **定时**：工作流每天 UTC 03:00 检查上游最新 release，有更新就打包并创建 Release。
 - **手动**：仓库 → Actions → *Build SUSFS LKM Loader Module* → Run workflow
   （可填上游 tag，留空即最新）。
+- **通知**：当检测到**上游新版本**时，除自动构建外，还会创建一个 @你 的 Issue，
+  通过 GitHub 通知提醒你（同一个 tag 不会重复通知）。
 
-产物在仓库的 **Releases** 页，下载 `susfs-lkm-loader-<tag>.zip` 直接刷入即可。
+产物在仓库的 **Releases** 页：
+
+- 通用包 `susfs-lkm-loader-<tag>.zip`：含全部内核变体，开机自动匹配；
+- 单变体包 `susfs-lkm-loader-<tag>-<kmi>.zip`：如 `susfs-lkm-loader-v2.3.0-r18-android12-5.10.zip`，
+  只含该内核的 `.ko`，按需下载刷入。
 
 ### 2. 本地打包
 
@@ -55,8 +65,9 @@ chmod +x build.sh
 产物输出到 `out/`：
 
 ```
-out/susfs-lkm-loader-<tag>.zip
-out/susfs-lkm-loader-<tag>.zip.sha256
+out/susfs-lkm-loader-<tag>.zip                # 通用包（全部内核变体）
+out/susfs-lkm-loader-<tag>-android12-5.10.zip # 单变体……每个内核一份
+out/SHA256SUMS                                # 所有 zip 的校验和
 out/build-info.env
 ```
 

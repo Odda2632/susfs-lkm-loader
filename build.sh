@@ -87,7 +87,9 @@ VERSION_CODE=$(( major * 1000000 + minor * 10000 + patch * 100 + rev ))
 
 DESC="Auto-built from $UPSTREAM_REPO@$TAG; loads the kernel-matching susfs_guard_lkm.ko at boot."
 
-sed -e "s|__VERSION__|$TAG|g" \
+sed -e "s|__ID__|susfs_lkm_loader|g" \
+    -e "s|__NAME__|SUSFS LKM Loader (Auto-Build)|g" \
+    -e "s|__VERSION__|$TAG|g" \
     -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
     -e "s|__AUTHOR__|$AUTHOR|g" \
     -e "s|__DESC__|$DESC|g" \
@@ -98,22 +100,60 @@ chmod 755 "$STAGE/post-fs-data.sh"
 [ -f "$STAGE/loader/susfs_insmod" ] && chmod 755 "$STAGE/loader/susfs_insmod"
 chmod 644 "$STAGE/module.prop" "$STAGE"/loader/*.ko
 
-# 5) 打包
+# 5) 通用包：内含全部内核变体，开机按 KMI 自动匹配
 mkdir -p "$OUT_DIR"
 OUT_DIR_ABS="$(cd "$OUT_DIR" && pwd)"
 ZIP_NAME="susfs-lkm-loader-${TAG}.zip"
 ZIP="$OUT_DIR_ABS/$ZIP_NAME"
 rm -f "$ZIP"
 ( cd "$STAGE" && zip -qr -9 "$ZIP" . )
+echo "==> 通用产物: $ZIP"
 
-( cd "$OUT_DIR_ABS" && sha256sum "$ZIP_NAME" > "$ZIP_NAME.sha256" )
+# 6) 单内核变体包：每个 .ko 单独一份（例如 android12-5.10）
+VARIANT_LIST=""
+for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
+  [ -f "$ko" ] || continue
+  base="$(basename "$ko" .ko)"                 # susfs_guard_lkm-android12-5.10
+  kmi="${base#susfs_guard_lkm-}"               # android12-5.10
+  vid="susfs_lkm_loader_$(printf '%s' "$kmi" | tr -c 'A-Za-z0-9_' '_')"
+
+  vstage="$(mktemp -d)"
+  mkdir -p "$vstage/loader"
+  cp "$ko" "$vstage/loader/"
+  [ -f "$STAGE/loader/susfs_insmod" ] && cp "$STAGE/loader/susfs_insmod" "$vstage/loader/"
+
+  vdesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi ($base.ko)."
+  sed -e "s|__ID__|$vid|g" \
+      -e "s|__NAME__|SUSFS LKM Loader ($kmi)|g" \
+      -e "s|__VERSION__|$TAG|g" \
+      -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
+      -e "s|__AUTHOR__|$AUTHOR|g" \
+      -e "s|__DESC__|$vdesc|g" \
+      "$TEMPLATE_DIR/module.prop" > "$vstage/module.prop"
+  sed -e "s|__KO_NAME__|$(basename "$ko")|g" \
+      "$TEMPLATE_DIR/post-fs-data-variant.sh" > "$vstage/post-fs-data.sh"
+
+  chmod 755 "$vstage/post-fs-data.sh"
+  [ -f "$vstage/loader/susfs_insmod" ] && chmod 755 "$vstage/loader/susfs_insmod"
+  chmod 644 "$vstage/module.prop" "$vstage/loader/"*.ko
+
+  vzip="$OUT_DIR_ABS/susfs-lkm-loader-${TAG}-${kmi}.zip"
+  rm -f "$vzip"
+  ( cd "$vstage" && zip -qr -9 "$vzip" . )
+  rm -rf "$vstage"
+  VARIANT_LIST="$VARIANT_LIST $kmi"
+  echo "==> 变体产物: $vzip"
+done
+
+# 7) 校验和汇总
+( cd "$OUT_DIR_ABS" && sha256sum ./*.zip > SHA256SUMS )
 
 cat > "$OUT_DIR_ABS/build-info.env" <<EOF
 tag=$TAG
 upstream_repo=$UPSTREAM_REPO
 version_code=$VERSION_CODE
 zip=$ZIP
+variants=${VARIANT_LIST# }
 EOF
 
-echo "==> 产物: $ZIP"
-echo "==> 校验: $ZIP.sha256"
+echo "==> 校验汇总: $OUT_DIR_ABS/SHA256SUMS"

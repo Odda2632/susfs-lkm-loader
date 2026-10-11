@@ -1,7 +1,7 @@
 name: Build SUSFS LKM Loader Module
 
 on:
-  # 每天 03:00 UTC 自动检查上游是否有新 release，有则重新打包
+  # 每天 03:00 UTC 自动检查上游是否有新 release，有则重新打包并通知
   schedule:
     - cron: "0 3 * * *"
   # 允许手动触发（可指定上游 tag，留空 = 最新）
@@ -13,7 +13,8 @@ on:
         default: ""
 
 permissions:
-  contents: write
+  contents: write   # 创建 Release / 上传资产
+  issues: write     # 上游更新时创建通知 Issue
 
 concurrency:
   group: susfs-lkm-loader
@@ -42,7 +43,7 @@ jobs:
           name: susfs-lkm-loader-${{ steps.build.outputs.tag }}
           path: |
             out/*.zip
-            out/*.sha256
+            out/SHA256SUMS
 
       - name: Check if release already exists
         id: check
@@ -61,9 +62,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "susfs-lkm-loader-${{ steps.build.outputs.tag }}" \
-            out/*.zip out/*.sha256 \
+            out/*.zip out/SHA256SUMS \
             --title "SUSFS LKM Loader ${{ steps.build.outputs.tag }}" \
             --notes "Auto-built from ${{ steps.build.outputs.upstream_repo }}@${{ steps.build.outputs.tag }}.
 
-          - 含全部 GKI 内核变体的 \`susfs_guard_lkm-*.ko\` 与 \`susfs_insmod\` 加载器
-          - 开机时按设备内核 KMI 自动选择并加载对应 .ko"
+          - 通用包 \`susfs-lkm-loader-${{ steps.build.outputs.tag }}.zip\`：含全部 GKI 内核变体，开机按设备 KMI 自动匹配加载
+          - 单变体包 \`...-<kmi>.zip\`：每个内核变体各一份（如 \`android12-5.10\`），只含对应 .ko，开机直接加载"
+
+      - name: Notify owner (new upstream release)
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "上游新版本已自动构建：${{ steps.build.outputs.tag }}" \
+            --body "@${{ github.repository_owner }} 检测到上游 [\${{ steps.build.outputs.upstream_repo }}](https://github.com/${{ steps.build.outputs.upstream_repo }}) 发布新版本 \`${{ steps.build.outputs.tag }}\`，已自动打包完成。
+
+          - Release：https://github.com/${{ github.repository }}/releases/tag/susfs-lkm-loader-${{ steps.build.outputs.tag }}
+          - 通用包（全部内核变体）：\`susfs-lkm-loader-${{ steps.build.outputs.tag }}.zip\`
+          - 单变体包：\`susfs-lkm-loader-${{ steps.build.outputs.tag }}-android12-5.10.zip\` 等，见 Release 附件"

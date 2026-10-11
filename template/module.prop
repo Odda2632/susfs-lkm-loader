@@ -1,5 +1,5 @@
-id=susfs_lkm_loader
-name=SUSFS LKM Loader (Auto-Build)
+id=__ID__
+name=__NAME__
 version=__VERSION__
 versionCode=__VERSION_CODE__
 author=__AUTHOR__
