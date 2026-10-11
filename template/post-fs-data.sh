@@ -1,20 +1,23 @@
 #!/system/bin/sh
-# SUSFS LKM Loader（通用版）—— 由 service.sh 在 late_start 阶段按设备内核 KMI 精确匹配并加载
-# 由 GitHub Actions 打包，loader/ 内含全部内核变体的 .ko 与 susfs_insmod。
+# SUSFS LKM Loader（通用版）—— 在 post-fs-data 阶段按设备内核 KMI 精确匹配并加载对应 .ko。
 #
-# 为何放在 service.sh 而不是 post-fs-data：在内核启动早期加载这个会 hook LSM 的 .ko
-# 会导致开机卡第一屏；等系统起来（late_start）再加载则正常。
+# 加载方式（关键）：用 release 自带的 susfs_insmod 直接加载，并传 expose_proc=1。
+# 不要用 `ksud insmod`：它会在启动早期回调 KernelSU 自身、造成死锁，表现为“卡第一屏”。
+# 这一点与社区参考实现（matsuzaka-yuki/susfs-lkm-module）一致。
 #
 # 安全策略：
-#   1) 只加载与 uname -r 完全对应的那一份 .ko；匹配不到就跳过，绝不猜。
-#   2) 防砖守卫：加载前写 guard 标记，开机完成后由 boot-completed.sh 清除。
-#      若下次开机时 guard 仍在，说明上次加载后没能开机 → 自动禁用，避免无限重启。
+#   1) 按真实内核串(/proc/sys/kernel/osrelease)精确匹配那一份 .ko，匹配不到就跳过，绝不猜。
+#   2) 若已有 SUSFS(/proc/susfs 存在)，不叠加，直接跳过（叠加会 panic）。
+#   3) 防砖守卫：加载前写 guard，开机完成后由 boot-completed.sh 清除；若下次开机 guard 仍在，
+#      说明上次加载后没能开机 → 自动禁用，避免无限重启。
 
 MODDIR=${0%/*}
 LOADER_DIR="$MODDIR/loader"
 LOG=/data/adb/susfs_lkm.log
 GUARD=/data/adb/susfs_lkm.guard
 DISABLED=/data/adb/susfs_lkm.disabled
+
+[ -f "$MODDIR/disable" ] && exit 0
 
 log_msg() {
   log -p i -t susfs_lkm "$@"
@@ -50,7 +53,18 @@ else
 fi
 touch "$GUARD"; sync
 
-KVER=$(uname -r)
+# 真实内核串：uname 可能已被其它 SUSFS 实现伪造
+KVER=$(cat /proc/sys/kernel/osrelease 2>/dev/null)
+[ -n "$KVER" ] || KVER=$(uname -r)
+
+# 已有 SUSFS 就绝不叠加
+if [ -e /proc/susfs ] || [ -e /proc/susfs_mnt_id ]; then
+  log_msg "existing SUSFS detected (/proc/susfs); skip to avoid stacking"
+  update_status "未加载: 检测到已有 SUSFS，避免叠加"
+  rm -f "$GUARD"
+  exit 1
+fi
+
 # GKI KMI，例如 "5.15.202-android13-8-xxxx" -> android13 + 5.15
 AND_PART=$(echo "$KVER" | grep -oE 'android1[0-9]' | head -n1)
 MM_PART=$(echo "$KVER" | grep -oE '^[0-9]+\.[0-9]+' | head -n1)
@@ -69,18 +83,21 @@ fi
 
 log_msg "loading $KO (kernel $KVER)"
 
-# KernelSU/APatch 设备用 ksud；非 KernelSU 才用 release 自带的 susfs_insmod
-if command -v ksud >/dev/null 2>&1; then
-  ksud insmod "$KO"
-elif [ -x "$LOADER_DIR/susfs_insmod" ]; then
-  "$LOADER_DIR/susfs_insmod" "$KO"
-else
-  log_msg "no usable loader (ksud / susfs_insmod); skip loading"
-  update_status "未加载: 无可用加载器"
+if [ ! -x "$LOADER_DIR/susfs_insmod" ]; then
+  log_msg "susfs_insmod missing; skip loading"
+  update_status "未加载: 缺少 susfs_insmod"
   rm -f "$GUARD"
   exit 1
 fi
+
+# 用自带的 susfs_insmod 加载（不要用 ksud insmod）。先带 expose_proc=1，参数不被接受则退回无参。
+"$LOADER_DIR/susfs_insmod" "$KO" expose_proc=1
 status=$?
+if [ "$status" -ne 0 ]; then
+  log_msg "susfs_insmod with expose_proc=1 failed (exit=$status); retry without params"
+  "$LOADER_DIR/susfs_insmod" "$KO"
+  status=$?
+fi
 
 if [ "$status" -eq 0 ]; then
   log_msg "loaded ok"

@@ -1,16 +1,18 @@
 #!/system/bin/sh
-# SUSFS LKM Loader（单内核变体版，无内核校验）—— 由 service.sh 在 late_start 阶段
-# 直接加载内置的 __KO_NAME__（放 late_start 而非 post-fs-data，避免开机卡第一屏）。
+# SUSFS LKM Loader（单内核变体版，无内核校验）—— post-fs-data 阶段直接加载内置的
+# __KO_NAME__。加载方式与参考实现一致：用自带的 susfs_insmod（不要用 ksud insmod）。
 #
-# 注意：本包不做任何内核 KMI 校验，会把 __KO_NAME__ 无条件加载。仅在你确认内核
-# 匹配、或校验逻辑误判时使用；装错内核会 panic，请自担风险。
-# 仍有防砖守卫：加载失败导致无法开机时自动禁用。
+# 注意：本包不做内核 KMI 校验，会把 __KO_NAME__ 无条件加载；装错内核会 panic，请自担风险。
+# 仍有防砖守卫：加载后无法开机时下次自动禁用。
 
 MODDIR=${0%/*}
-KO="$MODDIR/loader/__KO_NAME__"
+LOADER_DIR="$MODDIR/loader"
+KO="$LOADER_DIR/__KO_NAME__"
 LOG=/data/adb/susfs_lkm.log
 GUARD=/data/adb/susfs_lkm.guard
 DISABLED=/data/adb/susfs_lkm.disabled
+
+[ -f "$MODDIR/disable" ] && exit 0
 
 log_msg() {
   log -p i -t susfs_lkm "$@"
@@ -46,7 +48,17 @@ else
 fi
 touch "$GUARD"; sync
 
-KVER=$(uname -r)
+# 真实内核串：uname 可能已被其它 SUSFS 实现伪造
+KVER=$(cat /proc/sys/kernel/osrelease 2>/dev/null)
+[ -n "$KVER" ] || KVER=$(uname -r)
+
+# 已有 SUSFS 就绝不叠加
+if [ -e /proc/susfs ] || [ -e /proc/susfs_mnt_id ]; then
+  log_msg "existing SUSFS detected (/proc/susfs); skip to avoid stacking"
+  update_status "未加载: 检测到已有 SUSFS，避免叠加"
+  rm -f "$GUARD"
+  exit 1
+fi
 
 if [ ! -f "$KO" ]; then
   log_msg "ko not found: $KO"
@@ -57,18 +69,21 @@ fi
 
 log_msg "loading $KO (kernel $KVER) [no-check]"
 
-# KernelSU/APatch 设备用 ksud；非 KernelSU 才用 release 自带的 susfs_insmod
-if command -v ksud >/dev/null 2>&1; then
-  ksud insmod "$KO"
-elif [ -x "$MODDIR/loader/susfs_insmod" ]; then
-  "$MODDIR/loader/susfs_insmod" "$KO"
-else
-  log_msg "no usable loader (ksud / susfs_insmod); skip loading"
-  update_status "未加载: 无可用加载器"
+if [ ! -x "$LOADER_DIR/susfs_insmod" ]; then
+  log_msg "susfs_insmod missing; skip loading"
+  update_status "未加载: 缺少 susfs_insmod"
   rm -f "$GUARD"
   exit 1
 fi
+
+# 用自带的 susfs_insmod 加载（不要用 ksud insmod）。先带 expose_proc=1，参数不被接受则退回无参。
+"$LOADER_DIR/susfs_insmod" "$KO" expose_proc=1
 status=$?
+if [ "$status" -ne 0 ]; then
+  log_msg "susfs_insmod with expose_proc=1 failed (exit=$status); retry without params"
+  "$LOADER_DIR/susfs_insmod" "$KO"
+  status=$?
+fi
 
 if [ "$status" -eq 0 ]; then
   log_msg "loaded ok"
