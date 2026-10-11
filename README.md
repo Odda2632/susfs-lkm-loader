@@ -1,8 +1,12 @@
-# SUSFS LKM Loader (Auto-Build)
+# SUSFS LKM AutoLoader (Auto-Build)
 
 自动追踪上游 [inforcqb/susfs4ksu-lkm](https://github.com/inforcqb/susfs4ksu-lkm) 的最新 release，
 把其中的 `susfs_guard_lkm-*.ko`（全部内核变体）与 `susfs_insmod` 加载器重新封装成一个
 可直接刷入 **KernelSU / APatch** 的模块 ZIP。
+
+模块 id 为 `susfs_lkm_autoloader`（单变体为 `susfs_lkm_autoloader_<kmi>`，
+无校验变体再加 `_nocheck` 后缀）；上游为 **GPL-2.0**，因此每个模块包内都附带
+`LICENSE`（GPL-2.0 全文）与 `provenance.json`（溯源信息）。
 
 > 本项目（含打包脚本、模块脚本与本文档）由 AI（TraeCode）协作生成与维护。
 > 涉及内核级操作，请在可救砖的设备上自行审阅、测试。
@@ -58,6 +62,7 @@ GitHub Actions（每天 03:00 UTC / 手动触发 / 改动 build.sh|template 时�
 .
 ├── .github/workflows/build.yml      # 工作流：定时/手动/改动触发，打包并发布/更新 Release
 ├── build.sh                         # 核心打包脚本（本地也能直接跑）
+├── LICENSE                          # GPL-2.0 全文（与上游一致，会打进模块包）
 ├── template/
 │   ├── module.prop                  # 模块元信息模板（__ID__/__VERSION__/__AUTHOR__…）
 │   ├── service.sh                   # 通用包：late_start 按 KMI 匹配并加载 .ko
@@ -73,6 +78,8 @@ GitHub Actions（每天 03:00 UTC / 手动触发 / 改动 build.sh|template 时�
 
 ```
 module.prop
+LICENSE                 # GPL-2.0 全文
+provenance.json         # 溯源：上游 仓库/tag/commit + 本包内各二进制的 sha256
 service.sh              # 开机脚本（late_start）
 boot-completed.sh       # 清守卫
 action.sh               # "操作"按钮
@@ -81,6 +88,39 @@ skip_mount              # 不挂载 system 覆盖层（纯脚本模块，无需 
 loader/
 ├── susfs_insmod                        # 上游加载器（0755）
 └── susfs_guard_lkm-android12-5.10.ko   # 对应内核变体
+```
+
+## 许可与溯源
+
+上游 [inforcqb/susfs4ksu-lkm](https://github.com/inforcqb/susfs4ksu-lkm) 为 **GPL-2.0**，
+本仓库同许可，仓库根与每个模块包内都带 GPL-2.0 全文 `LICENSE`。
+
+`build.sh` 会额外生成 `provenance.json` 并放进每个模块包（同时在 `out/` 下另出一份
+随 Release 发布）：
+
+```json
+{
+  "schema": 1,
+  "generated_at": "2026-10-11T23:09:19Z",
+  "generator": "build.sh (Odda2632 & TraeCode, AI-assisted)",
+  "module": { "id": "susfs_lkm_autoloader_android12_5_10_nocheck",
+              "version": "v2.3.0-r18", "versionCode": 2030018 },
+  "upstream": { "repo": "inforcqb/susfs4ksu-lkm", "tag": "v2.3.0-r18",
+                "commit": "4636014b5f9e043007733490d6fd4c05129454e3",
+                "url": "https://github.com/inforcqb/susfs4ksu-lkm/tree/v2.3.0-r18",
+                "license": "GPL-2.0" },
+  "artifacts": [
+    { "name": "susfs_guard_lkm-android12-5.10.ko", "sha256": "291982…8b62" },
+    { "name": "susfs_insmod", "sha256": "2c23e2…0608" }
+  ]
+}
+```
+
+设备上可直接核对：
+
+```bash
+cat /data/adb/modules/susfs_lkm_autoloader/provenance.json
+sha256sum /data/adb/modules/susfs_lkm_autoloader/loader/*.ko
 ```
 
 ## 实现方式（脚本细节）
@@ -195,10 +235,10 @@ out/build-info.env
 - **有 root / ADB**：
   - 重新启用自动加载：`adb shell su -c 'rm -f /data/adb/susfs_lkm.disabled /data/adb/susfs_lkm.guard'`
   - 暂停自动加载：`adb shell su -c 'touch /data/adb/susfs_lkm.disabled'`
-  - 禁用整个模块：`adb shell su -c 'ksud module disable susfs_lkm_loader_android12_5_10'`
+  - 禁用整个模块：`adb shell su -c 'ksud module disable susfs_lkm_autoloader_android12_5_10'`
 - **进 recovery**：挂载 `/data` 后删除标记或模块目录再开机：
   `rm -f /data/adb/susfs_lkm.guard /data/adb/susfs_lkm.disabled`
-  `rm -rf /data/adb/modules/susfs_lkm_loader*`
+  `rm -rf /data/adb/modules/susfs_lkm_autoloader*`
 - **查原因**：`cat /data/adb/susfs_lkm.log`、`/sys/fs/pstore/console-ramoops*`。
 
 > `.ko` 必须与设备内核 KMI 精确匹配；内核若锁死 LKM 加载、或非 GKI/CFI 内核
@@ -208,4 +248,4 @@ out/build-info.env
 
 本项目仅做上游 release 的自动拉取与重新封装，不改动任何内核代码。
 SUSFS LKM 属内核级修改，存在风险，请仅在可救砖的设备上做技术研究，后果自负。
-上游许可：GPL-2.0。
+上游与本仓库许可：**GPL-2.0**（全文见 [LICENSE](file:///workspace/susfs-lkm-loader/LICENSE)，模块包内同样附带）。

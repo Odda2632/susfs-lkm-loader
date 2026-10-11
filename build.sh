@@ -16,6 +16,7 @@
 set -euo pipefail
 
 UPSTREAM_REPO="${UPSTREAM_REPO:-inforcqb/susfs4ksu-lkm}"
+MODULE_ID="susfs_lkm_autoloader"
 # 上游 GitHub 原作者（从仓库名推导，例如 inforcqb/susfs4ksu-lkm -> inforcqb）
 UPSTREAM_AUTHOR="${UPSTREAM_REPO%%/*}"
 AUTHOR="${AUTHOR:-Odda2632 & TraeCode}"
@@ -30,6 +31,45 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/template"
 
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+
+# 生成 provenance.json：记录上游来源（仓库 / tag / commit）与该模块内每个二进制
+# （susfs_guard_lkm-*.ko 与 susfs_insmod）的 sha256，便于溯源与校验。
+# 用法: write_provenance <模块目录> <模块 id>
+write_provenance() {
+  local dir="$1" mid="$2"
+  local rows artifacts
+  rows="$(cd "$dir/loader" && for f in *; do
+      [ -f "$f" ] || continue
+      printf '%s\t%s\n' "$f" "$(sha256sum "$f" | awk '{print $1}')"
+    done)"
+  artifacts="$(printf '%s\n' "$rows" | jq -R -s '
+    split("\n")
+    | map(select(length > 0) | split("\t") | { name: .[0], sha256: .[1] })
+  ')"
+  jq -n \
+    --arg gen "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    --arg mid "$mid" \
+    --arg ver "$TAG" \
+    --argjson vcode "$VERSION_CODE" \
+    --arg repo "$UPSTREAM_REPO" \
+    --arg tag "$TAG" \
+    --arg commit "$COMMIT_SHA" \
+    --argjson artifacts "$artifacts" \
+    '{
+       schema: 1,
+       generated_at: $gen,
+       generator: "build.sh (Odda2632 & TraeCode, AI-assisted)",
+       module: { id: $mid, version: $ver, versionCode: $vcode },
+       upstream: {
+         repo: $repo,
+         tag: $tag,
+         commit: $commit,
+         url: ("https://github.com/" + $repo + "/tree/" + $tag),
+         license: "GPL-2.0"
+       },
+       artifacts: $artifacts
+     }' > "$dir/provenance.json"
+}
 
 api() {
   local url="$1"
@@ -51,6 +91,11 @@ if [ -z "$TAG" ] || [ "$TAG" = "latest" ]; then
   [ -n "$TAG" ] && [ "$TAG" != "null" ] || { echo "无法解析上游最新 release" >&2; exit 1; }
 fi
 echo "==> 目标版本: $TAG"
+
+# 1b) 解析该 tag 对应的上游 commit（写入 provenance.json）
+COMMIT_SHA="$(api "https://api.github.com/repos/$UPSTREAM_REPO/commits/$TAG" | jq -r '.sha // empty' || true)"
+[ -n "$COMMIT_SHA" ] || COMMIT_SHA="unknown"
+echo "==> 上游 commit: $COMMIT_SHA"
 
 # 2) 拉取该 release 的资产清单（.ko 与 susfs_insmod 加载器）
 RELEASE_JSON="$(api "https://api.github.com/repos/$UPSTREAM_REPO/releases/tags/$TAG")"
@@ -93,8 +138,8 @@ VERSION_CODE=$(( major * 1000000 + minor * 10000 + patch * 100 + rev ))
 
 DESC="Auto-built from $UPSTREAM_REPO@$TAG (LKM by $UPSTREAM_AUTHOR); picks the matching susfs_guard_lkm.ko and loads it via susfs_insmod at late_start."
 
-sed -e "s|__ID__|susfs_lkm_loader|g" \
-    -e "s|__NAME__|SUSFS LKM Loader (Auto-Build)|g" \
+sed -e "s|__ID__|$MODULE_ID|g" \
+    -e "s|__NAME__|SUSFS LKM AutoLoader (Auto-Build)|g" \
     -e "s|__VERSION__|$TAG|g" \
     -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
     -e "s|__AUTHOR__|$AUTHOR_SED|g" \
@@ -104,11 +149,16 @@ cp "$TEMPLATE_DIR/service.sh" "$STAGE/service.sh"
 cp "$TEMPLATE_DIR/boot-completed.sh" "$STAGE/boot-completed.sh"
 cp "$TEMPLATE_DIR/action.sh" "$STAGE/action.sh"
 cp "$TEMPLATE_DIR/customize.sh" "$STAGE/customize.sh"
+cp "$SCRIPT_DIR/LICENSE" "$STAGE/LICENSE"
 touch "$STAGE/skip_mount"
 
 chmod 755 "$STAGE/service.sh" "$STAGE/boot-completed.sh" "$STAGE/action.sh" "$STAGE/customize.sh"
 [ -f "$STAGE/loader/susfs_insmod" ] && chmod 755 "$STAGE/loader/susfs_insmod"
-chmod 644 "$STAGE/module.prop" "$STAGE"/loader/*.ko
+chmod 644 "$STAGE/module.prop" "$STAGE/LICENSE" "$STAGE"/loader/*.ko
+
+# 溯源信息：记录上游仓库 / tag / commit 与每个二进制的 sha256
+write_provenance "$STAGE" "$MODULE_ID"
+chmod 644 "$STAGE/provenance.json"
 
 # 5) 通用包：内含全部内核变体，开机按 KMI 自动匹配
 mkdir -p "$OUT_DIR"
@@ -118,6 +168,8 @@ ZIP="$OUT_DIR_ABS/$ZIP_NAME"
 rm -f "$ZIP"
 ( cd "$STAGE" && zip -qr -9 "$ZIP" . )
 echo "==> 通用产物: $ZIP"
+# 通用 provenance 也单独产出一份（随 Release 一起发布）
+cp "$STAGE/provenance.json" "$OUT_DIR_ABS/provenance-${TAG}.json"
 
 # 6) 单内核变体包：每个 .ko 单独一份（例如 android12-5.10）
 VARIANT_LIST=""
@@ -125,7 +177,7 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
   [ -f "$ko" ] || continue
   base="$(basename "$ko" .ko)"                 # susfs_guard_lkm-android12-5.10
   kmi="${base#susfs_guard_lkm-}"               # android12-5.10
-  vid="susfs_lkm_loader_$(printf '%s' "$kmi" | tr -c 'A-Za-z0-9_' '_')"
+  vid="${MODULE_ID}_$(printf '%s' "$kmi" | tr -c 'A-Za-z0-9_' '_')"
 
   vstage="$(mktemp -d)"
   mkdir -p "$vstage/loader"
@@ -134,7 +186,7 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
 
   vdesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi ($base.ko); KMI-checked load via susfs_insmod at late_start."
   sed -e "s|__ID__|$vid|g" \
-      -e "s|__NAME__|SUSFS LKM Loader ($kmi)|g" \
+      -e "s|__NAME__|SUSFS LKM AutoLoader ($kmi)|g" \
       -e "s|__VERSION__|$TAG|g" \
       -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
       -e "s|__AUTHOR__|$AUTHOR_SED|g" \
@@ -147,11 +199,14 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
   cp "$TEMPLATE_DIR/boot-completed.sh" "$vstage/boot-completed.sh"
   cp "$TEMPLATE_DIR/action.sh" "$vstage/action.sh"
   cp "$TEMPLATE_DIR/customize.sh" "$vstage/customize.sh"
+  cp "$SCRIPT_DIR/LICENSE" "$vstage/LICENSE"
   touch "$vstage/skip_mount"
 
   chmod 755 "$vstage/service.sh" "$vstage/boot-completed.sh" "$vstage/action.sh" "$vstage/customize.sh"
   [ -f "$vstage/loader/susfs_insmod" ] && chmod 755 "$vstage/loader/susfs_insmod"
-  chmod 644 "$vstage/module.prop" "$vstage/loader/"*.ko
+  chmod 644 "$vstage/module.prop" "$vstage/LICENSE" "$vstage/loader/"*.ko
+  write_provenance "$vstage" "$vid"
+  chmod 644 "$vstage/provenance.json"
 
   vzip="$OUT_DIR_ABS/susfs-lkm-loader-${TAG}-${kmi}.zip"
   rm -f "$vzip"
@@ -170,7 +225,7 @@ for kmi in $NOCHECK_VARIANTS; do
     echo "==> 跳过无校验变体（无此 ko）: $kmi"
     continue
   fi
-  vid="susfs_lkm_loader_$(printf '%s' "$kmi" | tr -c 'A-Za-z0-9_' '_')_nocheck"
+  vid="${MODULE_ID}_$(printf '%s' "$kmi" | tr -c 'A-Za-z0-9_' '_')_nocheck"
 
   nstage="$(mktemp -d)"
   mkdir -p "$nstage/loader"
@@ -179,7 +234,7 @@ for kmi in $NOCHECK_VARIANTS; do
 
   ndesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi, NO kernel KMI check; load via susfs_insmod at late_start."
   sed -e "s|__ID__|$vid|g" \
-      -e "s|__NAME__|SUSFS LKM Loader ($kmi, no-check)|g" \
+      -e "s|__NAME__|SUSFS LKM AutoLoader ($kmi, no-check)|g" \
       -e "s|__VERSION__|$TAG|g" \
       -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
       -e "s|__AUTHOR__|$AUTHOR_SED|g" \
@@ -190,11 +245,14 @@ for kmi in $NOCHECK_VARIANTS; do
   cp "$TEMPLATE_DIR/boot-completed.sh" "$nstage/boot-completed.sh"
   cp "$TEMPLATE_DIR/action.sh" "$nstage/action.sh"
   cp "$TEMPLATE_DIR/customize.sh" "$nstage/customize.sh"
+  cp "$SCRIPT_DIR/LICENSE" "$nstage/LICENSE"
   touch "$nstage/skip_mount"
 
   chmod 755 "$nstage/service.sh" "$nstage/boot-completed.sh" "$nstage/action.sh" "$nstage/customize.sh"
   [ -f "$nstage/loader/susfs_insmod" ] && chmod 755 "$nstage/loader/susfs_insmod"
-  chmod 644 "$nstage/module.prop" "$nstage/loader/"*.ko
+  chmod 644 "$nstage/module.prop" "$nstage/LICENSE" "$nstage/loader/"*.ko
+  write_provenance "$nstage" "$vid"
+  chmod 644 "$nstage/provenance.json"
 
   nzip="$OUT_DIR_ABS/susfs-lkm-loader-${TAG}-${kmi}-nocheck.zip"
   rm -f "$nzip"
@@ -210,8 +268,10 @@ done
 cat > "$OUT_DIR_ABS/build-info.env" <<EOF
 tag=$TAG
 upstream_repo=$UPSTREAM_REPO
+upstream_commit=$COMMIT_SHA
 version_code=$VERSION_CODE
 zip=$ZIP
+provenance=$OUT_DIR_ABS/provenance-${TAG}.json
 variants=${VARIANT_LIST# }
 nocheck=${NOCHECK_LIST# }
 EOF
