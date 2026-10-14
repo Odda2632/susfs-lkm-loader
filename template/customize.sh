@@ -1,14 +1,20 @@
 #!/system/bin/sh
-# 安装时执行：设置可执行权限，并清除上一次的“防砖禁用/守卫”标记，
-# 这样每次覆盖安装后都会重新尝试加载，不必手动去删 /data/adb/susfs_lkm.disabled。
+# SPDX-License-Identifier: GPL-2.0-only
+# Installer: set permissions and clear the previous brick-guard/disabled markers, so a
+# reinstall always retries the load without the user having to delete the marker by hand.
 
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/loader/susfs_insmod" 0 0 0755
-set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
+set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/boot-completed.sh" 0 0 0755
+set_perm "$MODPATH/_lib.sh" 0 0 0644
+
+# drop stamp files left by a previous install (stale build hashes etc.)
+rm -f "$MODPATH"/.stamp-* 2>/dev/null
 
 rm -f /data/adb/susfs_lkm.disabled /data/adb/susfs_lkm.guard
 
-ui_print "- 已授权 susfs_insmod 可执行"
-ui_print "- 已清除上次的禁用标记，重启后将重新尝试加载"
+ui_print "- susfs_insmod is executable"
+ui_print "- cleared the previous disabled/guard markers; the load will be retried on boot"
+ui_print "- stacking is refused: if SUSFS is already live, nothing is loaded"

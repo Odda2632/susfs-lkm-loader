@@ -1,3 +1,4 @@
 #!/system/bin/sh
-# 开机完成 —— 说明本次加载没有导致无法开机，清除守卫标记。
+# SPDX-License-Identifier: GPL-2.0-only
+# Boot finished, so the load attempt did not hang the device. Clear the guard marker.
 rm -f /data/adb/susfs_lkm.guard

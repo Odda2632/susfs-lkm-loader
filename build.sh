@@ -99,10 +99,11 @@ echo "==> 上游 commit: $COMMIT_SHA"
 
 # 2) 拉取该 release 的资产清单（.ko 与 susfs_insmod 加载器）
 RELEASE_JSON="$(api "https://api.github.com/repos/$UPSTREAM_REPO/releases/tags/$TAG")"
+# name<TAB>url<TAB>sha256 (empty when the API omits .digest - older GitHub).
 ASSET_ROWS="$(echo "$RELEASE_JSON" | jq -r '
   .assets[]
   | select((.name | test("^susfs_guard_lkm-.*\\.ko$")) or .name == "susfs_insmod")
-  | "\(.name)\t\(.browser_download_url)"
+  | "\(.name)\t\(.browser_download_url)\t\((.digest // "") | sub("^sha256:"; ""))"
 ')"
 
 if [ -z "$ASSET_ROWS" ]; then
@@ -116,13 +117,27 @@ trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/loader"
 
 echo "==> 下载资产:"
-while IFS=$'\t' read -r name url; do
+while IFS=$'\t' read -r name url digest; do
   [ -z "$name" ] && continue
   echo "    - $name"
   if [ -n "$TOKEN" ]; then
     curl -fsSL -H "Authorization: Bearer $TOKEN" -o "$STAGE/loader/$name" "$url"
   else
     curl -fsSL -o "$STAGE/loader/$name" "$url"
+  fi
+  # Verify the asset against the digest GitHub reported for it. A truncated or
+  # swapped download would otherwise be packaged and shipped as a kernel module.
+  if [ -n "$digest" ]; then
+    got="$(sha256sum "$STAGE/loader/$name" | awk '{print $1}')"
+    if [ "$got" != "$digest" ]; then
+      echo "!! sha256 mismatch for $name" >&2
+      echo "   expected $digest" >&2
+      echo "   got      $got" >&2
+      exit 1
+    fi
+    echo "      sha256 ok"
+  else
+    echo "      (no digest published by the API; recorded in provenance only)" >&2
   fi
 done <<< "$ASSET_ROWS"
 
@@ -146,6 +161,7 @@ sed -e "s|__ID__|$MODULE_ID|g" \
     -e "s|__DESC__|$DESC|g" \
     "$TEMPLATE_DIR/module.prop" > "$STAGE/module.prop"
 cp "$TEMPLATE_DIR/service.sh" "$STAGE/service.sh"
+cp "$TEMPLATE_DIR/_lib.sh" "$STAGE/_lib.sh"
 cp "$TEMPLATE_DIR/boot-completed.sh" "$STAGE/boot-completed.sh"
 cp "$TEMPLATE_DIR/action.sh" "$STAGE/action.sh"
 cp "$TEMPLATE_DIR/customize.sh" "$STAGE/customize.sh"
@@ -153,6 +169,7 @@ cp "$SCRIPT_DIR/LICENSE" "$STAGE/LICENSE"
 touch "$STAGE/skip_mount"
 
 chmod 755 "$STAGE/service.sh" "$STAGE/boot-completed.sh" "$STAGE/action.sh" "$STAGE/customize.sh"
+chmod 644 "$STAGE/_lib.sh"
 [ -f "$STAGE/loader/susfs_insmod" ] && chmod 755 "$STAGE/loader/susfs_insmod"
 chmod 644 "$STAGE/module.prop" "$STAGE/LICENSE" "$STAGE"/loader/*.ko
 
@@ -196,6 +213,7 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
       -e "s|__AND__|${kmi%-*}|g" \
       -e "s|__MM__|${kmi#*-}|g" \
       "$TEMPLATE_DIR/service-variant.sh" > "$vstage/service.sh"
+  cp "$TEMPLATE_DIR/_lib.sh" "$vstage/_lib.sh"
   cp "$TEMPLATE_DIR/boot-completed.sh" "$vstage/boot-completed.sh"
   cp "$TEMPLATE_DIR/action.sh" "$vstage/action.sh"
   cp "$TEMPLATE_DIR/customize.sh" "$vstage/customize.sh"
@@ -203,6 +221,7 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
   touch "$vstage/skip_mount"
 
   chmod 755 "$vstage/service.sh" "$vstage/boot-completed.sh" "$vstage/action.sh" "$vstage/customize.sh"
+  chmod 644 "$vstage/_lib.sh"
   [ -f "$vstage/loader/susfs_insmod" ] && chmod 755 "$vstage/loader/susfs_insmod"
   chmod 644 "$vstage/module.prop" "$vstage/LICENSE" "$vstage/loader/"*.ko
   write_provenance "$vstage" "$vid"
@@ -242,6 +261,7 @@ for kmi in $NOCHECK_VARIANTS; do
       "$TEMPLATE_DIR/module.prop" > "$nstage/module.prop"
   sed -e "s|__KO_NAME__|$(basename "$ko")|g" \
       "$TEMPLATE_DIR/service-variant-nocheck.sh" > "$nstage/service.sh"
+  cp "$TEMPLATE_DIR/_lib.sh" "$nstage/_lib.sh"
   cp "$TEMPLATE_DIR/boot-completed.sh" "$nstage/boot-completed.sh"
   cp "$TEMPLATE_DIR/action.sh" "$nstage/action.sh"
   cp "$TEMPLATE_DIR/customize.sh" "$nstage/customize.sh"
@@ -249,6 +269,7 @@ for kmi in $NOCHECK_VARIANTS; do
   touch "$nstage/skip_mount"
 
   chmod 755 "$nstage/service.sh" "$nstage/boot-completed.sh" "$nstage/action.sh" "$nstage/customize.sh"
+  chmod 644 "$nstage/_lib.sh"
   [ -f "$nstage/loader/susfs_insmod" ] && chmod 755 "$nstage/loader/susfs_insmod"
   chmod 644 "$nstage/module.prop" "$nstage/LICENSE" "$nstage/loader/"*.ko
   write_provenance "$nstage" "$vid"
@@ -261,6 +282,46 @@ for kmi in $NOCHECK_VARIANTS; do
   NOCHECK_LIST="$NOCHECK_LIST $kmi"
   echo "==> 无校验变体产物: $nzip"
 done
+
+# 7b) 出厂前自检：每个 zip 必须是“可直接刷入”的模块（根目录含 module.prop），
+#     且必须带上共享库与可用的 service.sh；脚本语法错误在这里就会被拦下。
+REQUIRED="module.prop service.sh boot-completed.sh action.sh customize.sh LICENSE _lib.sh loader/susfs_insmod"
+vfail=0
+for z in "$OUT_DIR_ABS"/*.zip; do
+  [ -f "$z" ] || continue
+  names="$(unzip -Z1 "$z")"
+  for f in $REQUIRED; do
+    if ! printf '%s\n' "$names" | grep -qx "$f"; then
+      echo "!! $(basename "$z") 缺少 $f" >&2
+      vfail=1
+    fi
+  done
+  if ! printf '%s\n' "$names" | grep -qE '^loader/susfs_guard_lkm-.*\.ko$'; then
+    echo "!! $(basename "$z") 里没有任何 .ko" >&2
+    vfail=1
+  fi
+  # 脚本语法必须在打包机上就能过
+  tmpd="$(mktemp -d)"
+  unzip -qo "$z" -d "$tmpd"
+  for sh_f in service.sh boot-completed.sh action.sh customize.sh _lib.sh; do
+    if ! sh -n "$tmpd/$sh_f" 2>/dev/null; then
+      echo "!! $(basename "$z") 的 $sh_f 语法检查未通过" >&2
+      vfail=1
+    fi
+  done
+  # 关键回归：旧的错误判据不该再出现
+  if grep -q 'proc/susfs \] || \[ -e /proc/susfs_mnt_id' "$tmpd/service.sh"; then
+    echo "!! $(basename "$z") 仍然使用已废弃的 /proc/susfs 叠加判据" >&2
+    vfail=1
+  fi
+  if ! grep -q 'susfs_present' "$tmpd/service.sh"; then
+    echo "!! $(basename "$z") 的 service.sh 没有接入 susfs_present" >&2
+    vfail=1
+  fi
+  rm -rf "$tmpd"
+  [ "$vfail" = "0" ] && echo "==> 自检通过: $(basename "$z")"
+done
+[ "$vfail" = "0" ] || { echo "打包自检失败，拒绝产出 release" >&2; exit 1; }
 
 # 8) 校验和汇总
 ( cd "$OUT_DIR_ABS" && sha256sum ./*.zip > SHA256SUMS )
