@@ -1,100 +1,60 @@
 #!/system/bin/sh
-# SUSFS LKM Loader（单内核变体版，无内核校验）—— late_start(service.sh) 直接加载内置的
-# __KO_NAME__。加载方式与参考实现一致：用自带的 susfs_insmod（不要用 ksud insmod）。
-# 放到 late_start 而不是 post-fs-data，避免开机早期加载导致卡第一屏。
+# SPDX-License-Identifier: GPL-2.0-only
+# SUSFS LKM AutoLoader (single KMI variant, NO KMI check) - load __KO_NAME__ as-is.
 #
-# 注意：本包不做内核 KMI 校验，会把 __KO_NAME__ 无条件加载；装错内核会 panic，请自担风险。
-# 仍有防砖守卫：加载后无法开机时下次自动禁用。
+# Intended for kernels whose release string carries no "androidNN" field, where no
+# automatic KMI match is possible. The operator is asserting that this .ko is the
+# right one; loading the wrong one can still panic. The "already loaded" check below
+# is NOT optional and is still enforced.
 
 MODDIR=${0%/*}
 LOADER_DIR="$MODDIR/loader"
 KO="$LOADER_DIR/__KO_NAME__"
-LOG=/data/adb/susfs_lkm.log
-GUARD=/data/adb/susfs_lkm.guard
-DISABLED=/data/adb/susfs_lkm.disabled
 
+if [ ! -f "$MODDIR/_lib.sh" ]; then
+  log -p e -t susfs_lkm "_lib.sh missing; refusing to run" 2>/dev/null
+else
+  . "$MODDIR/_lib.sh"
+fi
 [ -f "$MODDIR/disable" ] && exit 0
 
-log_msg() {
-  log -p i -t susfs_lkm "$@"
-  echo "$(date '+%F %T') $*" >> "$LOG" 2>/dev/null
-}
+guard_check || exit 1
+guard_begin
 
-# 把加载状态写回 module.prop 的 description，KSU 管理器中即可看到
-update_status() {
-  prop="$MODDIR/module.prop"
-  [ -f "$prop" ] || return 0
-  desc=$(sed -n 's/^description=//p' "$prop" | head -n1 | sed 's/ *||STATUS:.*$//')
-  tmp="$MODDIR/.module.prop.tmp"
-  grep -v '^description=' "$prop" > "$tmp" 2>/dev/null || return 0
-  printf 'description=%s ||STATUS:%s\n' "$desc" "$1" >> "$tmp"
-  mv "$tmp" "$prop"
-}
-
-# ---- 防砖守卫 ----
-if [ "$SUSFS_FORCE" = "1" ]; then
-  rm -f "$DISABLED"
-else
-  if [ -f "$DISABLED" ]; then
-    log_msg "disabled marker present; skip loading"
-    update_status "已禁用: 上次加载后未能开机（管理器点“操作”可手动重试）"
-    exit 1
-  fi
-  if [ -f "$GUARD" ]; then
-    mv -f "$GUARD" "$DISABLED"
-    log_msg "previous load never reached boot-completed; auto-disabled to protect boot"
-    update_status "已自动禁用: 上次加载后未能开机（管理器点“操作”可手动重试）"
-    exit 1
-  fi
-fi
-touch "$GUARD"; sync
-
-# 真实内核串：uname 可能已被其它 SUSFS 实现伪造
-KVER=$(cat /proc/sys/kernel/osrelease 2>/dev/null)
-[ -n "$KVER" ] || KVER=$(uname -r)
-
-# 已有 SUSFS 就绝不叠加
-if [ -e /proc/susfs ] || [ -e /proc/susfs_mnt_id ]; then
-  log_msg "existing SUSFS detected (/proc/susfs); skip to avoid stacking"
-  update_status "未加载: 检测到已有 SUSFS，避免叠加"
-  rm -f "$GUARD"
+KVER="$(real_kernel_release)"
+if [ -z "$KVER" ]; then
+  log_msg "cannot read kernel release"
+  update_status "未加载: 读不到内核版本"
+  guard_abort
   exit 1
+fi
+# Deliberately no KMI match here - that is what "nocheck" means - but stacking is
+# still refused, and that is the check that keeps this variant from bricking.
+if susfs_present; then
+  log_msg "existing SUSFS detected; skip to avoid stacking"
+  update_status "未加载: 检测到已有 SUSFS，避免叠加"
+  guard_abort
+  exit 0
 fi
 
 if [ ! -f "$KO" ]; then
   log_msg "ko not found: $KO"
   update_status "未加载: 缺少 __KO_NAME__"
-  rm -f "$GUARD"
+  guard_abort
   exit 1
 fi
 
-log_msg "loading $KO (kernel $KVER) [no-check]"
-
-if [ ! -f "$LOADER_DIR/susfs_insmod" ]; then
-  log_msg "susfs_insmod missing; skip loading"
-  update_status "未加载: 缺少 susfs_insmod"
-  rm -f "$GUARD"
-  exit 1
-fi
-# 安装时若未带可执行位，这里补上（KernelSU 解压不一定保留）
-chmod 0755 "$LOADER_DIR/susfs_insmod" 2>/dev/null
-
-# 用自带的 susfs_insmod 加载（不要用 ksud insmod）。先带 expose_proc=1，参数不被接受则退回无参。
-"$LOADER_DIR/susfs_insmod" "$KO" expose_proc=1
+log_msg "loading $(basename "$KO") (kernel $KVER) [no-check]"
+load_ko "$KO" expose_proc=1
 status=$?
-if [ "$status" -ne 0 ]; then
-  log_msg "susfs_insmod with expose_proc=1 failed (exit=$status); retry without params"
-  "$LOADER_DIR/susfs_insmod" "$KO"
-  status=$?
-fi
 
 if [ "$status" -eq 0 ]; then
   log_msg "loaded ok"
   update_status "已加载 $(basename "$KO") (no-check) @ $(date '+%m-%d %H:%M')"
-  [ "$SUSFS_FORCE" = "1" ] && rm -f "$GUARD"
+  [ "${SUSFS_FORCE:-0}" = "1" ] && guard_abort
 else
   log_msg "load failed (exit=$status)"
   update_status "加载失败 exit=$status @ $(date '+%m-%d %H:%M')"
-  rm -f "$GUARD"
+  guard_abort
 fi
 exit $status

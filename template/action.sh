@@ -1,19 +1,23 @@
 #!/system/bin/sh
-# 在 KernelSU 管理器中点击“操作 / Action”按钮时执行：
-# 手动加载一次（跳过防砖守卫、清除“已禁用”标记），并把结果打印出来，供你安全测试。
+# SPDX-License-Identifier: GPL-2.0-only
+# KernelSU "Action" button: try one manual load, bypassing the GUARD and clearing the
+# disabled marker, and print the result so it can be tested safely.
 MODDIR=${0%/*}
 export SUSFS_FORCE=1
 
-echo "== SUSFS LKM 手动加载 =="
-echo "内核: $(cat /proc/sys/kernel/osrelease 2>/dev/null || uname -r)"
+echo "== SUSFS LKM manual load =="
+echo "kernel: $(cat /proc/sys/kernel/osrelease 2>/dev/null || uname -r)"
+if [ -d /sys/module/susfs_guard_lkm ]; then
+  echo "note: susfs_guard_lkm is ALREADY loaded; the script will skip (stacking is refused)"
+fi
 echo "----------------------------"
 sh "$MODDIR/service.sh"
 rc=$?
 echo "----------------------------"
 if [ "$rc" -eq 0 ]; then
-  echo "结果: 加载成功"
+  echo "result: loaded or already present"
 else
-  echo "结果: 未加载 / 失败 (exit=$rc)"
+  echo "result: not loaded / failed (exit=$rc)"
 fi
-echo "--- 最近日志 ---"
+echo "--- recent log ---"
 tail -n 8 /data/adb/susfs_lkm.log 2>/dev/null
