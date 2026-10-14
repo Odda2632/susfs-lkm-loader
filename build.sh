@@ -144,12 +144,16 @@ done <<< "$ASSET_ROWS"
 KO_COUNT="$(find "$STAGE/loader" -name 'susfs_guard_lkm-*.ko' | wc -l | tr -d ' ')"
 echo "==> 共下载 $KO_COUNT 个 .ko 变体"
 
-# 4) 计算 versionCode：major*1e6 + minor*1e4 + patch*1e2 + rev
+# 4) 计算 versionCode：major*1e8 + minor*1e6 + patch*1e4 + revA*1e2 + revB
+#    上游 tag 形如 v2.3.0-r18 / v2.3.0-r18.1，r 后的整数与小数点后的序号都要算进去，
+#    否则 "r18" 与 "r18.1" 会得到同一个 versionCode，KernelSU 认不出这是更新。
 major=$(printf '%s' "$TAG" | sed -nE 's/^[^0-9]*([0-9]+).*/\1/p'); major=${major:-0}
 minor=$(printf '%s' "$TAG" | sed -nE 's/^[^0-9]*[0-9]+\.([0-9]+).*/\1/p'); minor=${minor:-0}
 patch=$(printf '%s' "$TAG" | sed -nE 's/^[^0-9]*[0-9]+\.[0-9]+\.([0-9]+).*/\1/p'); patch=${patch:-0}
-rev=$(printf '%s' "$TAG" | sed -nE 's/.*[rR]([0-9]+).*/\1/p'); rev=${rev:-0}
-VERSION_CODE=$(( major * 1000000 + minor * 10000 + patch * 100 + rev ))
+revA=$(printf '%s' "$TAG" | sed -nE 's/.*[rR]([0-9]+).*/\1/p'); revA=${revA:-0}
+revB=$(printf '%s' "$TAG" | sed -nE 's/.*[rR][0-9]+\.([0-9]+).*/\1/p'); revB=${revB:-0}
+VERSION_CODE=$(( major * 100000000 + minor * 1000000 + patch * 10000 + revA * 100 + revB ))
+echo "==> versionCode: $VERSION_CODE (major=$major minor=$minor patch=$patch revA=$revA revB=$revB)"
 
 DESC="Auto-built from $UPSTREAM_REPO@$TAG (LKM by $UPSTREAM_AUTHOR); picks the matching susfs_guard_lkm.ko and loads it via susfs_insmod at late_start."
 

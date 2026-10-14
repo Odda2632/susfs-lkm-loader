@@ -13,6 +13,7 @@ KO="$LOADER_DIR/__KO_NAME__"
 
 if [ ! -f "$MODDIR/_lib.sh" ]; then
   log -p e -t susfs_lkm "_lib.sh missing; refusing to run" 2>/dev/null
+  exit 1
 else
   . "$MODDIR/_lib.sh"
 fi

@@ -67,8 +67,17 @@ kmi_force_get() {
 # Guard: remember that a load is about to be attempted; boot-completed clears it.
 # If it is still there on the next boot, the load is assumed to have hung the
 # device and the module disables itself instead of looping forever.
+#
+# The boot id is stored with it to tell a real "previous boot failed" apart from
+# "another copy of this module wrote the guard moments ago in this same boot".
+# Without that distinction, installing two of these packages at once made the
+# second one auto-disable itself, as if the first had bricked the device.
+boot_id_get() {
+  cat /proc/sys/kernel/random/boot_id 2>/dev/null
+}
+
 guard_begin() {
-  printf '%s\n' "$(date '+%F %T')" > "$GUARD" 2>/dev/null
+  printf '%s %s\n' "$(boot_id_get)" "$(date '+%F %T')" > "$GUARD" 2>/dev/null
   sync
 }
 
@@ -86,6 +95,16 @@ guard_check() {
     return 1
   fi
   if [ -f "$GUARD" ]; then
+    g_boot=""
+    IFS=' ' read -r g_boot _ < "$GUARD" 2>/dev/null
+    cur_boot="$(boot_id_get)"
+    if [ -n "$g_boot" ] && [ "$g_boot" = "$cur_boot" ]; then
+      # Same boot: a sibling package already handled this boot's load. Leave its
+      # guard untouched and stand down - loading here would stack a second copy.
+      log_msg "guard is from this boot; a sibling package already handled the load, standing down"
+      update_status "未加载: 同机另一个 susfs_lkm_autoloader 包已接管本次加载"
+      return 1
+    fi
     mv -f "$GUARD" "$DISABLED"
     log_msg "previous load never reached boot-completed; auto-disabled to protect boot"
     update_status "已自动禁用: 上次加载后未能开机（管理器点“操作”可手动重试）"
