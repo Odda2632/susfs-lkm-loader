@@ -4,7 +4,7 @@
 把其中的 `susfs_guard_lkm-*.ko`（全部内核变体）与 `susfs_insmod` 加载器重新封装成可直接
 刷入 **KernelSU / APatch** 的模块 ZIP。
 
-- 模块 id：`susfs_lkm_autoloader`（单变体 `..._<kmi>`，无校验包再加 `_nocheck`）
+- 模块 id：`susfs_lkm_autoloader`（单变体 `..._<kmi>`）
 - 上游为 **GPL-2.0**，每个模块包内都带 `LICENSE`（全文）与 `provenance.json`（溯源）
 - 加载时机：**`late_start`（`service.sh`）**，用上游自带的 `susfs_insmod`，非 `ksud insmod`
 
@@ -25,7 +25,8 @@
 
 1. **确认内核**：`uname -r`，看内核串里的 KMI（形如 `android12-5.10`）。
    - 带 `-androidNN-` → 刷**与该 KMI 完全对应的单变体包**（如 `...-android12-5.10.zip`）。
-   - **不带** `-androidNN-`（魔改/厂商内核，如 `5.10.x-moon-xxxx`）→ 刷 **`-nocheck`** 包。
+   - **不带** `-androidNN-`（魔改/厂商内核，如 `5.10.x-moon-xxxx`）→ 刷通用包，并按下方
+     `kmi.force` 一节手工指定 KMI。
 2. 在管理器里刷入后重启（加载在 `late_start` 进行）。
 3. 打开模块卡片看状态（脚本把结果写回 `module.prop` 描述，如
    `||STATUS: 已加载 susfs_guard_lkm-android12-5.10.ko @ 10-12 20:30`）。
@@ -33,7 +34,7 @@
 **最安全的测试方式**：点模块的 **操作 / Action** 按钮 —— 立即手动加载一次并回显结果，
 不重启、无砖风险（成功后守卫自动清除）。
 
-> 只装**一个**包。同时装通用包与 `-nocheck` 包会互相干扰（详见下方守卫一节）。
+> 只装**一个**包。同时装通用包与单变体包会互相干扰（详见下方守卫一节）。
 
 ## 工作原理
 
@@ -44,7 +45,7 @@ GitHub Actions（每天 03:00 UTC / 手动 / 改动 build.sh|template|LICENSE �
         ├─ 下载 susfs_guard_lkm-*.ko + susfs_insmod（逐个比对 API 给出的 sha256）
         ├─ 用 template/ 生成 module.prop 与开机脚本，附上 LICENSE 与 provenance.json
         ├─ 出厂自检：文件齐备 / sh 语法 / 回归判据，不通过则拒绝出包
-        └─ 打 通用包 + 每个 KMI 的单变体包 + 无校验包
+        └─ 打 通用包 + 每个 KMI 的单变体包
    └─ 上传 Artifact + 创建/更新本仓库 Release（上游新版本额外开 Issue 通知）
 ```
 
@@ -83,14 +84,13 @@ GitHub Actions（每天 03:00 UTC / 手动 / 改动 build.sh|template|LICENSE �
 │   ├── _lib.sh                   # 共享库：叠加探测 / 守卫 / 取内核串 / 调加载器
 │   ├── service.sh                # 通用包：按 KMI 匹配并加载
 │   ├── service-variant.sh        # 单变体：先校验内核串再加载
-│   ├── service-variant-nocheck.sh# 单变体：跳过内核校验
 │   ├── boot-completed.sh         # 开机完成 → 清除守卫
 │   ├── action.sh                 # "操作"按钮 → 手动加载并回显
 │   └── customize.sh              # 安装时授权 + 清标记
 └── README.md
 ```
 
-打包后的模块 ZIP（以 `android12-5.10-nocheck` 为例）：
+打包后的模块 ZIP（以 `android12-5.10` 为例）：
 
 ```
 module.prop   LICENSE   provenance.json   skip_mount
@@ -112,12 +112,12 @@ loader/susfs_guard_lkm-android12-5.10.ko
   （`/data/adb/susfs_lkm.disabled`），最多只卡一次、不会无限重启。同一 boot_id 则说明
   是"同一台机器上另一个包刚写过守卫" → 本包让位、不加载（避免叠加），且不误禁用自己。
 
-### `service.sh` / 两个变体
+### `service.sh` / `service-variant.sh`
 
-流程同上。变体包把复制的模板里的 `__KO_NAME__` 换成内置 `.ko`，并（带校验版）要求内核串
-同时含 `__AND__`（如 `android12`）与 `__MM__`（如 `5.10`）；`-nocheck` 版不校验内核串，
-只保留叠加保护。通用包若匹配不到精确 KMI、且包内只有**一个** `.ko`，就用那一份；
-否则拒绝猜测。
+流程同上。变体包把模板里的 `__KO_NAME__` 换成内置 `.ko`，并要求内核串同时含
+`__AND__`（如 `android12`）与 `__MM__`（如 `5.10`），否则跳过、不加载。通用包按内核串
+解析 `androidNN` + `主.次` 匹配 `.ko`；匹配不到、且包内只有**一个** `.ko` 时用那一份，
+否则拒绝猜测（此时改用 `kmi.force`）。
 
 ### `kmi.force`（手工强制指定内核变体）
 
@@ -147,7 +147,6 @@ adb shell su -c 'echo android12-5.10 > /data/adb/modules/susfs_lkm_autoloader/km
 | --- | --- | --- |
 | `UPSTREAM_REPO` | `inforcqb/susfs4ksu-lkm` | 上游仓库 `owner/repo` |
 | `AUTHOR` | `Odda2632 & TraeCode` | 写入 `module.prop`；脚本自动追加 `(LKM by <上游 owner>)` |
-| `NOCHECK_VARIANTS` | `android12-5.10` | 额外产出的无校验变体，空格分隔 |
 | `GITHUB_TOKEN` / `GH_TOKEN` | 空 | 走认证请求，避免 API 限流 |
 
 ```bash
@@ -156,7 +155,7 @@ chmod +x build.sh
 ./build.sh v2.3.0-r18.1    # 指定 tag
 ```
 
-`out/` 会得到：通用包、各 KMI 单变体包、`-nocheck` 包、`provenance-<tag>.json`、`SHA256SUMS`。
+`out/` 会得到：通用包、各 KMI 单变体包、`provenance-<tag>.json`、`SHA256SUMS`。
 
 ## 许可与溯源
 
@@ -168,7 +167,7 @@ chmod +x build.sh
 {
   "schema": 1,
   "generator": "build.sh (Odda2632 & TraeCode, AI-assisted)",
-  "module":   { "id": "susfs_lkm_autoloader_android12_5_10_nocheck",
+  "module":   { "id": "susfs_lkm_autoloader_android12_5_10",
                 "version": "v2.3.0-r18.1", "versionCode": 203001801 },
   "upstream": { "repo": "inforcqb/susfs4ksu-lkm", "tag": "v2.3.0-r18.1",
                 "commit": "4636014b…", "license": "GPL-2.0",

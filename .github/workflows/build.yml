@@ -67,7 +67,6 @@ jobs:
 
           - 通用包 `susfs-lkm-loader-${{ steps.build.outputs.tag }}.zip`：含全部 GKI 内核变体，开机按设备 KMI 自动匹配
           - 单变体包 `...-<kmi>.zip`：每个内核变体各一份（如 `android12-5.10`），只含对应 .ko，加载前校验内核串
-          - 无校验包 `...-<kmi>-nocheck.zip`：不做 KMI 校验，直接加载（内核串不含 `-androidNN-` 时用这个）
           - 溯源文件 `provenance-${{ steps.build.outputs.tag }}.json`：记录上游仓库 / tag / commit 及每个 `.ko` 与 `susfs_insmod` 的 sha256
 
           每个模块 ZIP 内含 `LICENSE`（GPL-2.0 全文）与 `provenance.json`（该包自身的溯源信息）。

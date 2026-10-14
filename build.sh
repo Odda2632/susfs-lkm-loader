@@ -239,55 +239,7 @@ for ko in "$STAGE"/loader/susfs_guard_lkm-*.ko; do
   echo "==> 变体产物: $vzip"
 done
 
-# 7) 额外打包“无内核校验”变体（默认 android12-5.10，文件名带 -nocheck 区分）
-NOCHECK_VARIANTS="${NOCHECK_VARIANTS:-android12-5.10}"
-NOCHECK_LIST=""
-for kmi in $NOCHECK_VARIANTS; do
-  ko="$STAGE/loader/susfs_guard_lkm-${kmi}.ko"
-  if [ ! -f "$ko" ]; then
-    echo "==> 跳过无校验变体（无此 ko）: $kmi"
-    continue
-  fi
-  vid="${MODULE_ID}_$(printf '%s' "$kmi" | tr -c 'A-Za-z0-9_' '_')_nocheck"
-
-  nstage="$(mktemp -d)"
-  mkdir -p "$nstage/loader"
-  cp "$ko" "$nstage/loader/"
-  [ -f "$STAGE/loader/susfs_insmod" ] && cp "$STAGE/loader/susfs_insmod" "$nstage/loader/"
-
-  ndesc="Auto-built from $UPSTREAM_REPO@$TAG for $kmi, NO kernel KMI check; load via susfs_insmod at late_start."
-  sed -e "s|__ID__|$vid|g" \
-      -e "s|__NAME__|SUSFS LKM AutoLoader ($kmi, no-check)|g" \
-      -e "s|__VERSION__|$TAG|g" \
-      -e "s|__VERSION_CODE__|$VERSION_CODE|g" \
-      -e "s|__AUTHOR__|$AUTHOR_SED|g" \
-      -e "s|__DESC__|$ndesc|g" \
-      "$TEMPLATE_DIR/module.prop" > "$nstage/module.prop"
-  sed -e "s|__KO_NAME__|$(basename "$ko")|g" \
-      "$TEMPLATE_DIR/service-variant-nocheck.sh" > "$nstage/service.sh"
-  cp "$TEMPLATE_DIR/_lib.sh" "$nstage/_lib.sh"
-  cp "$TEMPLATE_DIR/boot-completed.sh" "$nstage/boot-completed.sh"
-  cp "$TEMPLATE_DIR/action.sh" "$nstage/action.sh"
-  cp "$TEMPLATE_DIR/customize.sh" "$nstage/customize.sh"
-  cp "$SCRIPT_DIR/LICENSE" "$nstage/LICENSE"
-  touch "$nstage/skip_mount"
-
-  chmod 755 "$nstage/service.sh" "$nstage/boot-completed.sh" "$nstage/action.sh" "$nstage/customize.sh"
-  chmod 644 "$nstage/_lib.sh"
-  [ -f "$nstage/loader/susfs_insmod" ] && chmod 755 "$nstage/loader/susfs_insmod"
-  chmod 644 "$nstage/module.prop" "$nstage/LICENSE" "$nstage/loader/"*.ko
-  write_provenance "$nstage" "$vid"
-  chmod 644 "$nstage/provenance.json"
-
-  nzip="$OUT_DIR_ABS/susfs-lkm-loader-${TAG}-${kmi}-nocheck.zip"
-  rm -f "$nzip"
-  ( cd "$nstage" && zip -qr -9 "$nzip" . )
-  rm -rf "$nstage"
-  NOCHECK_LIST="$NOCHECK_LIST $kmi"
-  echo "==> 无校验变体产物: $nzip"
-done
-
-# 7b) 出厂前自检：每个 zip 必须是“可直接刷入”的模块（根目录含 module.prop），
+# 7) 出厂前自检：每个 zip 必须是“可直接刷入”的模块（根目录含 module.prop），
 #     且必须带上共享库与可用的 service.sh；脚本语法错误在这里就会被拦下。
 REQUIRED="module.prop service.sh boot-completed.sh action.sh customize.sh LICENSE _lib.sh loader/susfs_insmod"
 vfail=0
@@ -338,7 +290,6 @@ version_code=$VERSION_CODE
 zip=$ZIP
 provenance=$OUT_DIR_ABS/provenance-${TAG}.json
 variants=${VARIANT_LIST# }
-nocheck=${NOCHECK_LIST# }
 EOF
 
 echo "==> 校验汇总: $OUT_DIR_ABS/SHA256SUMS"
